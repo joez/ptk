@@ -1,0 +1,944 @@
+#!/usr/bin/env perl
+# author: joe.zheng
+
+use strict;
+use warnings;
+
+use FindBin;
+use lib "$FindBin::RealBin/../lib";
+
+use Excel::Writer::XLSX;
+use Excel::Writer::XLSX::Utility;
+
+use XML::Reader qw/XML::Parsepp/;
+use XML::Writer;
+
+use Encode qw/decode/;
+use Encode::Guess;
+
+use Git::Repository 'Log';
+use System::Command;
+
+use Getopt::Long;
+use File::Path qw/make_path/;
+use File::Basename;
+use File::Spec::Functions qw/catdir catfile splitpath splitdir abs2rel/;
+use File::Find 'find';
+use IO::File;
+use Storable qw/nstore retrieve/;
+use Text::ParseWords;
+
+use Ptk::Base::Log;
+my $log = Ptk::Base::Log->new;
+
+my $script = basename($0);
+
+sub usage {
+  print <<"EOF";
+NAME
+    $script - Manage the Git repos
+
+SYNOPSIS
+    $script report-log [<options>] [<src>...]
+    $script report-syn [<options>] <this> <that> [<src>...]
+
+    $script forall [<options>] [<src>...]
+    $script match-cherry [<options>] <this> <that> [<src>...]
+
+    $script find-repo [<src>...]
+    $script dump-repo [<options>] [<src>...]
+
+DESCRIPTION
+    To manage the Git repos
+
+COMMAND
+    $script report-log [-r <root>] [-f <file>] [-q <query>] [<src>...]
+      export Git log into spreadsheet
+      <query>: the parameters passed to "git log"
+      <file>:  spreadsheet file path, default "log.xlsx"
+      <src>:   relative git repo paths
+
+    $script report-syn [-r <root>] [-f <file>] [-l <limit>] <this>
+    <that> [<src>...]
+      export commit list need to be synchronized from <that> to <this>
+      as an spreadsheet
+      <file>:  spreadsheet file path, default "syn.xlsx"
+      <limit>: up to and including <limit> are not reported on <that>
+      <this>:  working branch
+      <that>:  remote branch, mostly upstream
+      <src>:   relative Git repo paths
+
+    $script forall [-c <command>] [<src>...]
+      run a Git command in each Git repo
+      <command>: the Git command without "git", default is "status"
+      <src>:     relative Git repo paths
+
+    $script match-cherry [-r <root>] <this> <that> [<src>...]
+      find out all the original and picked cherries with the same changeset
+      (with same patch id), but different commit ids between two branches
+      <this>: working branch
+      <that>: remote branch, mostly upstream
+      <src>:  relative Git repo paths
+
+    $script find-repo [<src>...]
+      find valid Git repo in the <src> directories and output the paths,
+      it can be used to get the Git repo path list for later usage
+      <src>: directories to search, default is "."
+
+    $script dump-repo [-q <query>] [<src>...]
+      dump the Git repo paths in the given manifests
+      <query>: dump repo matching the query only, the query format is
+        queries separated by ',', each query is a key-value pair
+        separeated by ':', the key is the attribute of the repo definition
+        and the value is a substring to match. e.g. "revision:master"
+      <src>:   manifests to dump, default is ".repo/manifests/default.xml"
+
+OPTIONS
+
+    -r, --root
+      the root directory of the Git repo path, default is "."
+      all the Git repo paths are assumed relative to the root
+
+    -f, --file
+      the output file path
+
+    <src>
+      the source files or directories
+
+EXAMPLES
+    1. $script report-log Ptk
+      export all the commit list of "Ptk" to "log.xlsx"
+
+    2. $script dump-repo
+      dump all the git repo paths in the default manifest at
+      ".repo/manifests/default.xml"
+
+    3. $script dump-repo -q 'groups:device,revision:master' default.xml
+      dump all the git repo paths in the default manifest "default.xml"
+      with "groups" matches "device" AND "revision" matches "master"
+
+    4. $script dump-repo | xargs $script report-log -f all.xlsx
+      export all the commits of repos in default manifest to "all.xlsx"
+
+    5. $script find-repo > repo-list.txt
+      find out all the valid Git repo paths in the current directory
+      and redirect to repo-list.txt for later usage
+
+    6. $script report-log -q 'develop..upstream' repo-list.txt
+      export the commit list between "develop" and "upsteam" branches,
+      of the Git repos in the "repo-list.txt", and export to "log.xlsx"
+
+    7. $script forall Ptk
+      run "git status" in Git repo "Ptk"
+
+    8. $script forall -c 'pull --rebase' repo-list.txt
+      run "git pull --rebase" in Git repos in "repo-list.txt"
+
+    9. $script match-cherry develop upstream repo-list.txt
+      find all the commit with same changeset but different commit id,
+      between "develop" and "upstream" of Git repos in "repo-list.txt"
+
+    10. $script report-syn develop upstream repo-list.txt
+      export all the commit list only exist in the "upstream" branch of
+      Git repos in "repo-list.txt" into "syn.xlsx", which means commits
+      need to be cherry-picked
+
+NOTES
+    * all the Git repo paths are assumed relative to the root,
+      if a path pointing to a existing file, it will be regarded as a
+      file containing a path list
+
+SEE ALSO
+
+EOF
+
+  exit;
+}
+
+my %opt = (root => '.', query => '', file => '', limit => '', command => '');
+
+my $help;
+GetOptions(
+  "help|h"      => \$help,
+  "root|r=s"    => \$opt{root},
+  "file|f=s"    => \$opt{file},
+  "query|q=s"   => \$opt{query},
+  "limit|l=s"   => \$opt{limit},
+  "command|c=s" => \$opt{command},
+) or usage();
+
+my $cmd = lc(shift || '');
+usage() if $help || !$cmd;
+
+my %cmdcbs = (
+  "report-log"   => \&do_report_log,
+  "report-syn"   => \&do_report_syn,
+  "find-repo"    => \&do_find_repo,
+  "dump-repo"    => \&do_dump_repo,
+  "match-cherry" => \&do_match_cherry,
+  "forall"       => \&do_forall,
+);
+
+my $cb = $cmdcbs{$cmd};
+if ($cb) {
+  $cb->(@ARGV);
+}
+else {
+  warn 'no such command';
+  usage();
+}
+
+
+# subs
+
+
+sub resolve_list {
+  my @list;
+
+  foreach my $p (@_) {
+    if (-e $p && -f $p) {
+      open my $fh, '<', $p or die;
+      while (<$fh>) {
+        chomp;
+        s/#.*//;
+        s/^\s+//;
+        s/\s+$//;
+        next unless $_;
+
+        push @list, $_;
+      }
+      close $fh;
+    }
+    else {
+      push @list, $p;
+    }
+  }
+
+  return @list;
+}
+
+sub resolve_path {
+  wantarray ? map { catfile($opt{root}, $_) } @_ : catfile($opt{root}, shift);
+}
+
+sub do_find_repo {
+  my @dirs = @_;
+  unshift @dirs, '.' unless @dirs;
+
+  my %seen;
+
+  my $sub_wanted = sub {
+    if (-d $_) {
+      if (/\.git$/ || -e catfile($_, '.git')) {
+        $seen{$File::Find::name}++;
+        $File::Find::prune = 1;
+        $log->info($File::Find::name);
+      }
+    }
+  };
+  my $sub_preprocess = sub {
+    return grep { /^\.git$/ || !/^\./ } @_;
+  };
+
+  find({wanted => $sub_wanted, preprocess => $sub_preprocess}, $_)
+    foreach @dirs;
+
+  local $\ = "\n";
+  print $_ foreach sort keys %seen;
+}
+
+sub resolve_query {
+  my %queries = ();
+
+  for (@_) {
+    chomp;
+    for (split /\s*[,]\s*/) {
+      my ($k, $v) = split /[:]/;
+      $queries{$k} = qr/$v/i;
+    }
+  }
+
+  return \%queries;
+}
+
+sub get_resolved_repo {
+  my $db = shift or die;
+  my $p  = shift or die;
+
+  my $r = $db->{project}{data}{$p};
+  my $d = $db->{default};
+
+  return {%$d, %$r};
+}
+
+sub match_repo {
+  my $query = shift or die;
+  my $repo  = shift or die;
+
+  for my $k (keys %{$query}) {
+    my $q = $query->{$k};
+    my $v = $repo->{$k} || '';
+
+    return 0 unless $v =~ $q;
+  }
+
+  return 1;
+}
+
+sub do_dump_repo {
+  my @manifests = @_;
+  unshift @manifests, '.repo/manifests/default.xml' unless @manifests;
+
+  my $query = $opt{query} || '';
+
+  my $q = resolve_query($query);
+
+  local $\ = "\n";
+  for my $m (@manifests) {
+    my $db = parse_manifest($m);
+
+    for my $p (@{$db->{project}{seen}}) {
+      print $p if match_repo($q, get_resolved_repo($db, $p));
+    }
+  }
+}
+
+
+sub do_forall {
+  my @cmd = shellwords($opt{command} || 'status');
+  my @repos = resolve_list(@_);
+
+  my ($ttl, $cnt) = (scalar(@repos), 1);
+  for my $repo (@repos) {
+    $log->debug("[$cnt / $ttl] processing: $repo");
+    $cnt++;
+
+    for my $path (grep {-e} resolve_path($repo)) {
+      for ($path) {
+        $path = catdir($path, '.git') unless /\.git$/;
+      }
+      eval {
+        my $r = Git::Repository->new(git_dir => $path);
+        my $c = $r->command(@cmd);
+        my $o = $c->stdout;
+        my $e = $c->stderr;
+
+        while (<$e>) {
+          print STDERR $_;
+        }
+
+        while (<$o>) {
+          print STDOUT $_;
+        }
+
+        $c->close;
+      };
+    }
+  }
+}
+
+sub check_match_cherry {
+  my $dr   = shift;    # { id => {} }
+  my $this = shift;
+  my $that = shift;
+  my $factor = shift || [qw/patch_id change_id origin_id ticket_id subject/];
+
+  my $repo;
+  my $o = {data => [],};
+
+  for my $id (keys %$dr) {
+    my $d = $dr->{$id};
+    my $s = $d->{branch};
+
+    $repo = $d->{repo} unless $repo;
+
+    push @{$o->{change_id}{$_}{$s}}, $id for @{$d->{change_ids}};
+    push @{$o->{origin_id}{$_}{$s}}, $id for @{$d->{origin_ids}};
+    push @{$o->{ticket_id}{$_}{$s}}, $id for @{$d->{ticket_ids}};
+    for (qw/patch_id subject/) {
+      push @{$o->{$_}{$d->{$_}}{$s}}, $id if $d->{$_};
+    }
+  }
+
+  my %seen;
+
+  for my $reason (@$factor) {
+    next unless exists $o->{$reason};
+
+    for my $id (keys %{$o->{$reason}}) {
+      my $r = $o->{$reason}{$id};
+
+      if ($reason eq 'origin_id') {
+        if (exists $dr->{$id}) {
+          my $swap = $dr->{$id}{branch} eq $that;
+          my $other = $swap ? $this : $that;
+
+          my $a = $id;
+          if (exists $r->{$other}) {
+            for (@{$r->{$other}}) {
+              my $b = $_;
+              my $ab = $swap ? $b . $a : $a . $b;
+
+              next if exists $seen{$ab};
+              $seen{$ab}++;
+
+              push @{$o->{data}},
+                {
+                repo => $repo,
+                $this => $swap ? $b : $a,
+                $that => $swap ? $a : $b,
+                reason => $reason,
+                factor => $id,
+                };
+            }
+          }
+        }
+      }
+
+      if (exists $r->{$this} && exists $r->{$that}) {
+        for my $a (@{$r->{$this}}) {
+          for my $b (@{$r->{$that}}) {
+            my $ab = $a . $b;
+            next if exists $seen{$ab};
+            $seen{$ab}++;
+            push @{$o->{data}},
+              {
+              repo   => $repo,
+              $this  => $a,
+              $that  => $b,
+              reason => $reason,
+              factor => $id,
+              };
+          }
+        }
+      }
+    }
+  }
+
+  return $o;
+}
+
+sub do_match_cherry {
+  my $this = shift or usage();
+  my $that = shift or usage();
+
+  my $db    = {};
+  my @repos = resolve_list(@_);
+
+  my ($ttl, $cnt) = (scalar(@repos), 1);
+  for my $repo (@repos) {
+    my $dr = $db->{$repo} || {};
+    $db->{$repo} = $dr;
+
+    $log->debug("[$cnt / $ttl] processing: $repo");
+    $cnt++;
+
+    for my $path (grep {-e} resolve_path($repo)) {
+      for ($path) {
+        $path = catdir($path, '.git') unless /\.git$/;
+      }
+      eval {
+        my $r = Git::Repository->new(git_dir => $path);
+        my $a = $r->run(qw/rev-parse --verify/, $this);
+        my $b = $r->run(qw/rev-parse --verify/, $that);
+
+        for ($r->run(qw/rev-list --no-merges --left-right/, "$a...$b")) {
+          $log->debug($_);
+          my $side = substr($_, 0, 1) eq '<' ? $this : $that;
+          my $id = substr $_, 1;
+
+          my $d = get_commit_info($r, $id);
+          $d->{branch} = $side;
+          $d->{repo}   = $repo;
+
+          # compare patch-id
+          $d->{patch_id} = get_patch_id($r, $id);
+
+          $dr->{$id} = $d;
+        }
+      };
+    }
+  }
+
+  local $\ = "\n";
+  my $sep = "\t";
+  my @head = ('Repo', $this, $that, 'Reason', 'Factor');
+  my %fields;
+  @fields{@head} = ('repo', $this, $that, 'reason', 'factor');
+
+  print join($sep, @head);
+
+  for my $repo (sort keys %$db) {
+    my $dr = $db->{$repo};
+
+    my $m = check_match_cherry($dr, $this, $that);
+    for my $d (@{$m->{data}}) {
+      print join($sep, @{$d}{@fields{@head}});
+    }
+  }
+}
+
+sub do_report_log {
+  my $dst = $opt{file} || 'log.xlsx';
+
+  my $db = {};
+  $db->{meta}{refs}{query} = $opt{query};
+
+  my @repos = resolve_list(@_);
+  my ($ttl, $cnt) = (scalar(@repos), 1);
+  for my $p (@repos) {
+    $log->debug("[$cnt / $ttl] processing: $p");
+    $cnt++;
+
+    parse_repo_log($db, $_, $p) for grep {-e} resolve_path($p);
+  }
+
+  db_to_xls($dst, $db);
+}
+
+sub do_report_syn {
+  my $this = shift or usage();
+  my $that = shift or usage();
+
+  my $dst = $opt{file} || 'syn.xlsx';
+
+  my $db = {};
+  $db->{meta}{refs}{base} = $opt{limit};
+  $db->{meta}{refs}{this} = $this;
+  $db->{meta}{refs}{that} = $that;
+
+  my @repos = resolve_list(@_);
+  my ($ttl, $cnt) = (scalar(@repos), 1);
+  for my $p (@repos) {
+    $log->debug("[$cnt / $ttl] processing: $p");
+    $cnt++;
+
+    parse_repo_syn($db, $_, $p, $this, $that) for grep {-e} resolve_path($p);
+  }
+
+  db_to_xls($dst, $db);
+}
+
+sub parse_commit_message {
+  my $m = shift;
+  my $d = {};
+
+  foreach (split "\n", $m) {
+    chomp;
+    next unless $_;
+
+    # previous value may be overriden, just get the latest one
+    if (/^Change-Id:\s+(I[\da-f]{40})$/) {
+      push @{$d->{change_ids}}, $1;
+      $d->{change_id} = $1;
+      next;
+    }
+    if (/^Reviewed-on:\s+.+\/(\d+)$/) {
+      push @{$d->{request_ids}}, $1;
+      $d->{request_id} = $1;
+      next;
+    }
+    if (/^\(cherry picked from commit ([\da-f]{40})$/) {
+      push @{$d->{origin_ids}}, $1;
+      $d->{origin_id} = $1;
+      next;
+    }
+
+    if (/^Reviewed-by:\s+[^<]+<(([^@]+)@[\w.]+)>$/) {
+      push @{$d->{reviewers}}, $1 unless $2 =~ /_noreply/;
+      next;
+    }
+
+    if (/^(?:BZ):\s*([\d\s]+)$/) {
+      for (split /\s/, $1) {
+        if (/(\d+)/) {
+          push @{$d->{ticket_ids}}, $1;
+        }
+      }
+      next;
+    }
+
+    if (/^(?:Bug|Issue|UTP-Id):\s*(.+)$/) {
+      for (split /\s/, $1) {
+        if (/([A-Z-]*\d+)/) {
+          push @{$d->{ticket_ids}}, $1;
+        }
+      }
+      next;
+    }
+
+  }
+
+  #$log->debug($d);
+
+  return $d;
+}
+
+sub parse_repo_log {
+  my $db   = shift or die;
+  my $path = shift or die;
+  my $repo = shift or die;
+  my $query = $opt{query} || '--';
+
+  for ($path) {
+    $path = catdir($path, '.git') unless /\.git$/;
+  }
+  eval {
+    my $r = Git::Repository->new(git_dir => $path);
+    my $i = $r->log(shellwords $opt{query});
+
+    $log->info($path, $opt{query});
+    while (my $l = $i->next) {
+      my $d = {
+        repo            => $repo,
+        commit          => $l->commit,
+        author_name     => $l->author_name,
+        author_email    => $l->author_email,
+        author_time     => $l->author_localtime,
+        committer_name  => $l->committer_name,
+        committer_email => $l->committer_email,
+        committer_time  => $l->committer_localtime,
+        subject         => $l->subject,
+        body            => $l->body,
+      };
+      $log->info($d->{commit});
+
+      $d = {%$d, %{parse_commit_message($d->{body})}};
+
+      push @{$db->{data}{$repo}{id}}, $d->{commit};
+      $db->{data}{$repo}{data}{$d->{commit}} = $d;
+    }
+  };
+}
+
+sub get_patch_id {
+  my $repo = shift;
+  my $id   = shift;
+
+  my $cmd = $repo->command('patch-id');
+  my $fi  = $cmd->stdin;
+  my $fo  = $cmd->stdout;
+
+  my $fd = $repo->command('show', $id)->stdout;
+  while (<$fd>) {
+    print $fi $_;
+  }
+  close $fi;
+
+  my $patch_id = (split ' ', <$fo>)[0];
+  $cmd->close;
+
+  return $patch_id;
+}
+
+sub get_commit_info {
+  my $repo = shift;
+  my $id   = shift;
+
+  my $d = {};
+  my $l = $repo->log("-1", $id)->next;
+  $d = {
+    commit          => $l->commit,
+    author_name     => $l->author_name,
+    author_email    => $l->author_email,
+    author_time     => $l->author_localtime,
+    committer_name  => $l->committer_name,
+    committer_email => $l->committer_email,
+    committer_time  => $l->committer_localtime,
+    subject         => $l->subject,
+    body            => $l->body,
+    %{parse_commit_message($l->body)},
+    }
+    if $l;
+
+  return $d;
+}
+
+sub parse_repo_syn {
+  my $db   = shift or die;
+  my $path = shift or die;
+  my $repo = shift or die;
+  my $this = shift or die;
+  my $that = shift or die;
+
+  for ($path) {
+    $path = catdir($path, '.git') unless /\.git$/;
+  }
+  eval {
+    my $r = Git::Repository->new(git_dir => $path);
+    $log->info($path, $this, $that);
+    my $m = {};
+
+    for ($r->run(shellwords "cherry $this $that $opt{limit}")) {
+      if (/^\+\s*(.+)$/) {
+        my $id = $1;
+
+        $log->info($id);
+
+        my $d = get_commit_info($r, $id);
+        $d->{repo}   = $repo;
+        $d->{branch} = $that;
+
+        push @{$db->{data}{$repo}{id}}, $id;
+        $db->{data}{$repo}{data}{$id} = $d;
+
+        $m->{$id} = $d;
+      }
+    }
+
+    for ($r->run(qw/rev-list --no-merges --left-only/, "$this...$that")) {
+      my $id = $_;
+
+      my $d = get_commit_info($r, $id);
+      $d->{branch} = $this;
+      $d->{repo}   = $repo;
+
+      $m->{$id} = $d;
+    }
+
+    my $f = [qw/change_id origin_id ticket_id subject/];
+    $db->{match}{$repo} = check_match_cherry($m, $this, $that, $f);
+  };
+}
+
+sub parse_manifest {
+  my $manifest = shift or die;
+  my $db = shift || {};
+
+  my %xpath = (
+    manifest => '/manifest',
+    remote   => '/manifest/remote',
+    default  => '/manifest/default',
+    project  => '/manifest/project',
+  );
+  my $rdr = XML::Reader->new($manifest, {mode => 'attr-in-hash'});
+
+  $log->debug('parse manifest: ' . $manifest);
+  while ($rdr->iterate) {
+    if ($rdr->is_start) {
+      my $path = $rdr->path;
+      my $attr = $rdr->att_hash;
+      if ($path eq $xpath{remote}) {
+        $db->{remote}{$attr->{name}} = $attr;
+      }
+      elsif ($path eq $xpath{default}) {
+        $db->{default} = $attr;
+      }
+      elsif ($path eq $xpath{project}) {
+        $db->{project}{data}{$attr->{path}} = $attr;
+        push @{$db->{project}{seen}}, $attr->{path};
+      }
+      else {
+        $log->debug('skip node: ' . $rdr->path);
+      }
+    }
+    if ($rdr->is_text) {
+    }
+
+    if ($rdr->is_end) {
+    }
+  }
+  return $db;
+}
+
+sub format_date {
+  my ($sec, $min, $hour, $mday, $mon, $year) = localtime(shift);
+  return sprintf '%04d-%02d-%02d', $year + 1900, $mon + 1, $mday;
+}
+
+sub db_to_xls {
+  my $dst = shift or die;
+  my $db  = shift or die;
+
+  my @sheets     = qw/data summary ticket reviewer match integrator meta/;
+  my %sheet_name = map { ($_, $_) } @sheets;
+  my %sheet_need = map { ($_, 1) } @sheets;
+
+  $sheet_need{match} = exists $db->{match};
+
+  my %author_email;
+  my %id_ticket;
+  my %id_reviewer;
+  my $name_match = 'MatchedCherries';
+
+  my $workbook = Excel::Writer::XLSX->new($dst);
+  my $bold     = $workbook->add_format(bold => 1, align => 'center');
+  my $green    = $workbook->add_format(bg_color => '#A4D050');
+  my ($sheet, $worksheet);
+  my ($row,   $col);
+  my (@head,  @width);
+
+  my $SN = sub { $sheet_name{$_[0]} };
+  my $TN = sub { 'Tb' . ucfirst $SN->($_[0]) };
+  my $NEW_SHEET = sub {
+    ($row, $col) = (0, 0);
+    $worksheet = $workbook->add_worksheet($SN->($sheet));
+    $worksheet->freeze_panes(1, 0);
+    $worksheet->set_column($_, $_, $width[$_]) for 0 .. $#width;
+    $worksheet->write_row($row++, 0, \@head, $bold);
+  };
+  my $NEW_TABLE = sub {
+    my $n = $TN->($sheet);
+    my @c = map { +{header => $_} } @head;
+
+    $worksheet->add_table(0, 0, $row - 1, $#head,
+      {style => 'Table Style Light 1', columns => \@c, name => $n,});
+  };
+
+  my $NEED = sub { $sheet_need{+shift} };
+
+  # "data" worksheet
+  if ($NEED->($sheet = "data")) {
+    my @info = qw/ID Author Email Subject Repo Committer Date Gerrit/;
+    @head = (@info, qw/Status Type Integrator Note/);
+    @width = (42, 18, 30, 56, 46, 18, 10, 8, 8, 8, 10, 14);
+    my %fields;
+    @fields{@info}
+      = qw/commit author_name author_email subject repo committer_name committer_time request_id/;
+    my %head_idx;
+    {
+      my $i;
+      %head_idx = map +($_, $i++), @head;
+    }
+
+    $NEW_SHEET->();
+
+    foreach my $repo (sort keys %{$db->{data}}) {
+      foreach my $id (@{$db->{data}{$repo}{id}}) {
+        my %d = %{$db->{data}{$repo}{data}{$id}};
+
+        $author_email{$d{author_email}} = $d{author_name};
+        for (@{$d{ticket_ids}}) {
+          my $l = join ',', $id, $_;
+          $id_ticket{$l}++;
+        }
+        for (@{$d{reviewers}}) {
+          my $l = join ',', $id, $_;
+          $id_reviewer{$l}++;
+        }
+
+        $d{committer_time} = format_date($d{committer_time});
+        my @l = @d{@fields{@info}};
+        eval { $worksheet->write_row($row++, 0, \@l) };
+      }
+    }
+
+    my %field_to_defs = (Status => 'Status', Type => 'Types');
+    foreach (qw/Status Type/) {
+      $worksheet->data_validation(1, $head_idx{$_}, $row, $head_idx{$_},
+        {validate => 'list', source => "=$field_to_defs{$_}",});
+    }
+
+    $NEW_TABLE->();
+    $worksheet->conditional_formatting(
+      '$A:$A',
+      {
+        type     => 'formula',
+        format   => $green,
+        criteria => "=NOT(ISERROR(VLOOKUP(A1,$name_match,1,FALSE)))",
+      }
+    );
+
+    # CAUTION: the "Repo" column name is hardcoded
+    my $formula
+      = '=VLOOKUP([[#This Row],[Repo]],'
+      . $TN->($SN->("integrator"))
+      . ',3,FALSE)';
+    $worksheet->write(1, $head_idx{Integrator}, $formula);
+  }
+
+  # "summary" worksheet
+  if ($NEED->($sheet = "summary")) {
+    $worksheet = $workbook->add_worksheet($SN->($sheet));
+  }
+
+  # "ticket" worksheet
+  if ($NEED->($sheet = "ticket")) {
+    @head = qw/ID Ticket/;
+    @width = (42, 14);
+
+    $NEW_SHEET->();
+    for my $l (sort keys %id_ticket) {
+      $worksheet->write_row($row++, 0, [split ',', $l]);
+    }
+    $NEW_TABLE->();
+  }
+
+  # "reviewer" worksheet
+  if ($NEED->($sheet = "reviewer")) {
+    @head = qw/ID Reviewer/;
+    @width = (42, 30);
+
+    $NEW_SHEET->();
+    for my $l (sort keys %id_reviewer) {
+      $worksheet->write_row($row++, 0, [split ',', $l]);
+    }
+    $NEW_TABLE->();
+  }
+
+  # "match" worksheet
+  if ($NEED->($sheet = "match")) {
+    my ($this, $that) = @{$db->{meta}{refs}}{qw/this that/};
+
+    @head = ('Repo', $that, $this, 'Reason', 'Factor');
+    @width = (46, 42, 42, 10, 42);
+    my %fields;
+    @fields{@head} = ('repo', $that, $this, 'reason', 'factor');
+
+    $NEW_SHEET->();
+    foreach my $repo (sort keys %{$db->{match}}) {
+      foreach my $d (@{$db->{match}{$repo}{data}}) {
+
+        my @l = @{$d}{@fields{@head}};
+        eval { $worksheet->write_row($row++, 0, \@l) };
+      }
+    }
+    $NEW_TABLE->();
+
+    my $tn = $TN->($sheet);
+    $workbook->define_name($name_match, "=$tn\[[$that]:[$this]]");
+  }
+
+  # "integrator" worksheet
+  if ($NEED->($sheet = "integrator")) {
+    @head  = ('Repo', 'Email', 'Name');
+    @width = (46,     30,      18);
+
+    $NEW_SHEET->();
+    my @repos = sort keys %{$db->{data}};
+    $worksheet->write_col($row, $col++, \@repos);
+    $row = 1 + @repos;
+    $NEW_TABLE->();
+  }
+
+  # "meta" worksheet
+  if ($NEED->($sheet = "meta")) {
+    @head = qw/Types Status Priorities Repos Emails Authors References Note/;
+    @width = (10, 10, 10, 46, 30, 18, 40, 14);
+
+    my %defs = (
+      map({$_, []} @head),
+      Types      => [sort qw/Defect Feature Enhance Spec Custom Other/],
+      Status     => [sort qw/Todo Doing Done Redo Hold Never/],
+      Priorities => [sort qw/Low Normal High/],
+    );
+
+    for my $k (sort keys %{$db->{meta}{refs}}) {
+      push @{$defs{References}}, $db->{meta}{refs}{$k};
+      push @{$defs{Note}},       $k;
+    }
+    $defs{Repos} = [sort keys %{$db->{data}}];
+    for my $k (sort keys %author_email) {
+      push @{$defs{Emails}},  $k;
+      push @{$defs{Authors}}, $author_email{$k};
+    }
+
+    $NEW_SHEET->();
+    foreach (@head) {
+      $workbook->define_name($_,
+        xl_range_formula($SN->($sheet), $row, scalar @{$defs{$_}}, $col, $col)
+      );
+      $worksheet->write_col($row, $col++, $defs{$_});
+    }
+  }
+}

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+function show_hint
+{
+    cat <<EOF
+
+============================================
+PTK environment setup is done.
+
+PTK_HOME=$PTK_HOME
+PTK_BIN=$PTK_BIN
+PTK_LIB=$PTK_LIB
+
+PATH=$PATH
+PERL5LIB=$PERL5LIB
+
+PTK_LOG_LEVEL=$PTK_LOG_LEVEL
+============================================
+
+EOF
+}
+
+if [ "$0" = "$BASH_SOURCE" ]; then
+    echo 'Invoke using "source" please, e.g.'
+    echo "    source $BASH_SOURCE"
+else
+    # clear the old
+    if [ -n "$PTK_BIN" ]; then
+        export PATH=${PATH/$PTK_BIN:/}
+    fi
+    if [ -n "$PTK_LIB" ]; then
+        export PERL5LIB=${PERL5LIB/$PTK_LIB:/}
+    fi
+
+    # PTK home dir, where PTK is deployed
+    export PTK_HOME=$(dirname $(readlink -f $BASH_SOURCE))
+
+    export PTK_BIN=$PTK_HOME/bin
+    export PTK_LIB=$PTK_HOME/lib
+
+    # log level: [debug, info, warn, error, fatal]
+    export PTK_LOG_LEVEL=warn
+
+    export PATH=$PTK_BIN:$PATH
+    export PERL5LIB=$PTK_LIB:$PERL5LIB
+
+    show_hint
+fi

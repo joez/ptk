@@ -1,0 +1,4 @@
+#!/usr/bin/perl -pi
+# author: joe.zheng
+
+s/\r\n/\n/;
