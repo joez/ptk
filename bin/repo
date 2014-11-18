@@ -22,7 +22,7 @@ use System::Command;
 use Getopt::Long;
 use File::Path qw/make_path/;
 use File::Basename;
-use File::Spec::Functions qw/catdir catfile splitpath splitdir abs2rel/;
+use File::Spec::Functions qw/catdir catfile/;
 use File::Find 'find';
 use IO::File;
 use Storable qw/nstore retrieve/;
@@ -297,7 +297,7 @@ sub do_dump_repo {
   for my $m (@manifests) {
     my $db = parse_manifest($m);
 
-    for my $p (@{$db->{project}{seen}}) {
+    for my $p (sort @{$db->{project}{seen}}) {
       print $p if match_repo($q, get_resolved_repo($db, $p));
     }
   }
@@ -708,6 +708,7 @@ sub parse_manifest {
   my %xpath = (
     manifest => '/manifest',
     remote   => '/manifest/remote',
+    include  => '/manifest/include',
     default  => '/manifest/default',
     project  => '/manifest/project',
   );
@@ -718,7 +719,16 @@ sub parse_manifest {
     if ($rdr->is_start) {
       my $path = $rdr->path;
       my $attr = $rdr->att_hash;
-      if ($path eq $xpath{remote}) {
+
+      if ($path eq $xpath{include}) {
+        if ($attr->{name}) {
+          my $m = catfile(dirname($manifest), $attr->{name});
+
+          # parse included manifest
+          parse_manifest($m, $db);
+        }
+      }
+      elsif ($path eq $xpath{remote}) {
         $db->{remote}{$attr->{name}} = $attr;
       }
       elsif ($path eq $xpath{default}) {
@@ -738,6 +748,7 @@ sub parse_manifest {
     if ($rdr->is_end) {
     }
   }
+
   return $db;
 }
 
