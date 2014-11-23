@@ -24,6 +24,7 @@ use File::Path qw/make_path/;
 use File::Basename;
 use File::Spec::Functions qw/catdir catfile/;
 use File::Find 'find';
+use File::Temp qw/tempdir/;
 use IO::File;
 use Storable qw/nstore retrieve/;
 use Text::ParseWords;
@@ -40,7 +41,8 @@ NAME
 
 SYNOPSIS
     $script report-log [<options>] [<src>...]
-    $script report-syn [<options>] <this> <that> [<src>...]
+    $script report-sync [<options>] <this> <that> [<src>...]
+    $script report-repo [<options>] [<src>...]
 
     $script forall [<options>] [<src>...]
     $script match-cherry [<options>] <this> <that> [<src>...]
@@ -58,15 +60,24 @@ COMMAND
       <file>:  spreadsheet file path, default "log.xlsx"
       <src>:   relative git repo paths
 
-    $script report-syn [-r <root>] [-f <file>] [-l <limit>] <this>
+    $script report-sync [-r <root>] [-f <file>] [-l <limit>] <this>
     <that> [<src>...]
       export commit list need to be synchronized from <that> to <this>
       as an spreadsheet
-      <file>:  spreadsheet file path, default "syn.xlsx"
+      <file>:  spreadsheet file path, default "sync.xlsx"
       <limit>: up to and including <limit> are not reported on <that>
       <this>:  working branch
       <that>:  remote branch, mostly upstream
       <src>:   relative Git repo paths
+
+    $script report-repo [-u <url>] [-m <manifest>] [-f <file>]
+    [-q <query>] [<src>...]
+      export manifest information into spreadsheet
+      <url>:      manifest repo url, default ".repo/manifests"
+      <manifest>: alternative manifest, default "default.xml"
+      <query>:    same as in "dump-repo"
+      <file>:     spreadsheet file path, default "manifest.xlsx"
+      <src>:      manifest branches, default as HEAD
 
     $script forall [-c <command>] [<src>...]
       run a Git command in each Git repo
@@ -98,6 +109,12 @@ OPTIONS
     -r, --root
       the root directory of the Git repo path, default is "."
       all the Git repo paths are assumed relative to the root
+
+    -u, --url
+      the manifest repo url, default is ".repo/manifests"
+
+    -m, --manifest
+      the alternative manifest file to use, default is "default.xml"
 
     -f, --file
       the output file path
@@ -138,9 +155,9 @@ EXAMPLES
       find all the commit with same changeset but different commit id,
       between "develop" and "upstream" of Git repos in "repo-list.txt"
 
-    10. $script report-syn develop upstream repo-list.txt
+    10. $script report-sync develop upstream repo-list.txt
       export all the commit list only exist in the "upstream" branch of
-      Git repos in "repo-list.txt" into "syn.xlsx", which means commits
+      Git repos in "repo-list.txt" into "sync.xlsx", which means commits
       need to be cherry-picked
 
 NOTES
@@ -155,16 +172,26 @@ EOF
   exit;
 }
 
-my %opt = (root => '.', query => '', file => '', limit => '', command => '');
+my %opt = (
+  root     => '.',
+  query    => '',
+  file     => '',
+  limit    => '',
+  url      => '.repo/manifests',
+  manifest => 'default.xml',
+  command  => ''
+);
 
 my $help;
 GetOptions(
-  "help|h"      => \$help,
-  "root|r=s"    => \$opt{root},
-  "file|f=s"    => \$opt{file},
-  "query|q=s"   => \$opt{query},
-  "limit|l=s"   => \$opt{limit},
-  "command|c=s" => \$opt{command},
+  "help|h"       => \$help,
+  "root|r=s"     => \$opt{root},
+  "file|f=s"     => \$opt{file},
+  "query|q=s"    => \$opt{query},
+  "limit|l=s"    => \$opt{limit},
+  "url|u=s"      => \$opt{url},
+  "manifest|m=s" => \$opt{manifest},
+  "command|c=s"  => \$opt{command},
 ) or usage();
 
 my $cmd = lc(shift || '');
@@ -172,7 +199,8 @@ usage() if $help || !$cmd;
 
 my %cmdcbs = (
   "report-log"   => \&do_report_log,
-  "report-syn"   => \&do_report_syn,
+  "report-sync"  => \&do_report_sync,
+  "report-repo"  => \&do_report_repo,
   "find-repo"    => \&do_find_repo,
   "dump-repo"    => \&do_dump_repo,
   "match-cherry" => \&do_match_cherry,
@@ -221,6 +249,195 @@ sub resolve_path {
   wantarray ? map { catfile($opt{root}, $_) } @_ : catfile($opt{root}, shift);
 }
 
+sub get_temp_dir { return tempdir(CLEANUP => 1) }
+
+sub checkout_to {
+  my $dir = shift or die;
+  my $url = shift or die;
+  my $rev = shift || '';
+
+  my $git_dir = catfile($dir, '.git');
+  Git::Repository->run(qw/clone --mirror -s/, $url, $git_dir);
+
+  my $r = Git::Repository->new(git_dir => $git_dir, work_tree => $dir);
+  return $r->run(qw/reset --hard/, $rev);
+}
+
+sub do_report_repo {
+  my @revs = @_;
+  unshift @revs, 'HEAD' unless @revs;
+
+  my $dst      = $opt{file} || 'repo.xlsx';
+  my $url      = $opt{url};
+  my $manifest = $opt{manifest};
+  my $query    = $opt{query};
+
+  my $q  = resolve_query($query);
+  my $db = {};
+  $db->{meta}{$_} = {} for qw/path remote fetch review revs/;
+  $db->{meta}{info}{query}    = $query;
+  $db->{meta}{info}{manifest} = $manifest;
+  $db->{meta}{info}{revision} = join ', ', @revs;
+
+  for my $rev (@revs) {
+    $log->debug("processing: $rev");
+
+    my $dir = get_temp_dir();
+    checkout_to($dir, $url, $rev);
+
+    my $f = catfile($dir, $manifest);
+    my $m = parse_manifest($f);
+
+    for my $p (sort @{$m->{project}{seen}}) {
+      my $r = get_resolved_repo($m, $p);
+      if (match_repo($q, $r)) {
+        $db->{data}{$rev}{$p} = $r;
+
+        $db->{meta}{$_}{$r->{$_}}++ for qw/path remote fetch review/;
+      }
+    }
+    $db->{meta}{revs}{$rev}++ if exists $db->{data}{$rev};
+  }
+
+  for my $rev (keys %{$db->{meta}{revs}}) {
+    for my $p (keys %{$db->{meta}{path}}) {
+      $db->{revision}{$p}{$rev} = '';
+      if (exists $db->{data}{$rev} && exists $db->{data}{$rev}{$p}) {
+        $db->{revision}{$p}{$rev} = $db->{data}{$rev}{$p}{revision};
+      }
+    }
+  }
+
+  repo_to_xls($dst, $db);
+}
+
+sub repo_to_xls {
+  my $dst = shift or die;
+  my $db  = shift or die;
+
+  my @revs       = sort keys %{$db->{meta}{revs}};
+  my @sheets     = (@revs, qw/summary revision meta/);
+  my %sheet_name = map { ($_, $_) } @sheets;
+  my %sheet_need = map { ($_, 1) } @sheets;
+
+  $sheet_need{revision} = @revs > 1;
+
+  my $workbook = Excel::Writer::XLSX->new($dst);
+  my $bold     = $workbook->add_format(bold => 1, align => 'center');
+  my $green    = $workbook->add_format(bg_color => '#A4D050');
+  my ($sheet, $worksheet);
+  my ($row,   $col);
+  my (@head,  @width);
+
+  my $SN = sub { (my $n = $sheet_name{$_[0]}) =~ s|[\[\]\*\?:/\\]|.|g; $n };
+  my $TN = sub { 'Tb' . ucfirst $SN->($_[0]) };
+  my $NEW_SHEET = sub {
+    ($row, $col) = (0, 0);
+    $worksheet = $workbook->add_worksheet($SN->($sheet));
+    $worksheet->freeze_panes(1, 0);
+    $worksheet->set_column($_, $_, $width[$_]) for 0 .. $#width;
+    $worksheet->write_row($row++, 0, \@head, $bold);
+  };
+  my $NEW_TABLE = sub {
+    my $n = $TN->($sheet);
+    my @c = map { +{header => $_} } @head;
+
+    $worksheet->add_table(0, 0, $row > 1 ? $row - 1 : 1,
+      $#head, {style => 'Table Style Light 1', columns => \@c, name => $n,});
+  };
+
+  my $NEED = sub { $sheet_need{+shift} };
+
+  # "revision" worksheet
+  if ($NEED->($sheet = "revision")) {
+    my @info = (qw/Path/, @revs);
+    @head = (@info, qw/Note/);
+    @width = (40, ((30) x @revs), 20);
+    my %fields;
+    @fields{@info} = @info;
+    $fields{Path} = 'path';
+
+    my %head_idx;
+    {
+      my $i;
+      %head_idx = map +($_, $i++), @head;
+    }
+
+    $NEW_SHEET->();
+
+    for my $p (sort keys %{$db->{meta}{path}}) {
+      my %d = %{$db->{revision}{$p}};
+      $d{path} = $p;
+
+      my @l = @d{@fields{@info}};
+      eval { $worksheet->write_row($row++, 0, \@l) };
+    }
+
+    $NEW_TABLE->();
+  }
+
+  # "summary" worksheet
+  if ($NEED->($sheet = "summary")) {
+    $worksheet = $workbook->add_worksheet($SN->($sheet));
+  }
+
+  for my $rev (@revs) {
+    if ($NEED->($sheet = $rev)) {
+      my @info = qw/Path Revision Name Fetch Review Groups/;
+      @head = (@info, qw/Note/);
+      @width = (40, 30, 30, 30, 30, 20, 20);
+      my %fields;
+      @fields{@info} = qw/path revision name fetch review groups/;
+      my %head_idx;
+      {
+        my $i;
+        %head_idx = map +($_, $i++), @head;
+      }
+
+      $NEW_SHEET->();
+
+      foreach my $p (sort keys %{$db->{data}{$rev}}) {
+        my %d = %{$db->{data}{$rev}{$p}};
+
+        my @l = @d{@fields{@info}};
+        eval { $worksheet->write_row($row++, 0, \@l) };
+      }
+
+      $NEW_TABLE->();
+    }
+  }
+
+  # "meta" worksheet
+  if ($NEED->($sheet = "meta")) {
+    @head
+      = qw/Status Priorities Repos Remotes Fetches Reviews Parameters Values/;
+    @width = (10, 10, 40, 10, 30, 30, 20, 20);
+
+    my %defs = (
+      map({$_, []} @head),
+      Status     => [sort qw/Todo Doing Done Redo Hold Never/],
+      Priorities => [sort qw/Low Normal High/],
+    );
+
+    $defs{Repos}   = [sort keys %{$db->{meta}{path}}];
+    $defs{Remotes} = [sort keys %{$db->{meta}{remote}}];
+    $defs{Fetches} = [sort keys %{$db->{meta}{fetch}}];
+    $defs{Reviews} = [sort keys %{$db->{meta}{review}}];
+    for my $k (sort keys %{$db->{meta}{info}}) {
+      push @{$defs{Values}},     $db->{meta}{info}{$k};
+      push @{$defs{Parameters}}, $k;
+    }
+
+    $NEW_SHEET->();
+    foreach (@head) {
+      $workbook->define_name($_,
+        xl_range_formula($SN->($sheet), $row, scalar @{$defs{$_}}, $col, $col)
+      );
+      $worksheet->write_col($row, $col++, $defs{$_});
+    }
+  }
+}
+
 sub do_find_repo {
   my @dirs = @_;
   unshift @dirs, '.' unless @dirs;
@@ -265,8 +482,9 @@ sub get_resolved_repo {
   my $db = shift or die;
   my $p  = shift or die;
 
-  my $r = $db->{project}{data}{$p};
-  my $d = $db->{default};
+  my $dr = $db->{default}{remote};
+  my $d  = {%{$db->{remote}{$dr}}, %{$db->{default}}};
+  my $r  = $db->{project}{data}{$p};
 
   return {%$d, %$r};
 }
@@ -287,7 +505,7 @@ sub match_repo {
 
 sub do_dump_repo {
   my @manifests = @_;
-  unshift @manifests, '.repo/manifests/default.xml' unless @manifests;
+  unshift @manifests, catfile(@opt{qw/url manifest/}) unless @manifests;
 
   my $query = $opt{query} || '';
 
@@ -298,7 +516,8 @@ sub do_dump_repo {
     my $db = parse_manifest($m);
 
     for my $p (sort @{$db->{project}{seen}}) {
-      print $p if match_repo($q, get_resolved_repo($db, $p));
+      my $r = get_resolved_repo($db, $p);
+      print $p if match_repo($q, $r);
     }
   }
 }
@@ -496,11 +715,11 @@ sub do_report_log {
   db_to_xls($dst, $db);
 }
 
-sub do_report_syn {
+sub do_report_sync {
   my $this = shift or usage();
   my $that = shift or usage();
 
-  my $dst = $opt{file} || 'syn.xlsx';
+  my $dst = $opt{file} || 'sync.xlsx';
 
   my $db = {};
   $db->{meta}{refs}{base} = $opt{limit};
@@ -513,7 +732,7 @@ sub do_report_syn {
     $log->debug("[$cnt / $ttl] processing: $p");
     $cnt++;
 
-    parse_repo_syn($db, $_, $p, $this, $that) for grep {-e} resolve_path($p);
+    parse_repo_sync($db, $_, $p, $this, $that) for grep {-e} resolve_path($p);
   }
 
   db_to_xls($dst, $db);
@@ -654,7 +873,7 @@ sub get_commit_info {
   return $d;
 }
 
-sub parse_repo_syn {
+sub parse_repo_sync {
   my $db   = shift or die;
   my $path = shift or die;
   my $repo = shift or die;
@@ -703,7 +922,7 @@ sub parse_repo_syn {
 
 sub parse_manifest {
   my $manifest = shift or die;
-  my $db = shift || {};
+  my $db = shift || {project => {seen => []}};
 
   my %xpath = (
     manifest => '/manifest',
@@ -779,7 +998,7 @@ sub db_to_xls {
   my ($row,   $col);
   my (@head,  @width);
 
-  my $SN = sub { $sheet_name{$_[0]} };
+  my $SN = sub { (my $n = $sheet_name{$_[0]}) =~ s|[\[\]\*\?:/\\]|.|g; $n };
   my $TN = sub { 'Tb' . ucfirst $SN->($_[0]) };
   my $NEW_SHEET = sub {
     ($row, $col) = (0, 0);
@@ -792,8 +1011,8 @@ sub db_to_xls {
     my $n = $TN->($sheet);
     my @c = map { +{header => $_} } @head;
 
-    $worksheet->add_table(0, 0, $row - 1, $#head,
-      {style => 'Table Style Light 1', columns => \@c, name => $n,});
+    $worksheet->add_table(0, 0, $row > 1 ? $row - 1 : 1,
+      $#head, {style => 'Table Style Light 1', columns => \@c, name => $n,});
   };
 
   my $NEED = sub { $sheet_need{+shift} };
