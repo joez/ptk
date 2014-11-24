@@ -249,6 +249,24 @@ sub resolve_path {
   wantarray ? map { catfile($opt{root}, $_) } @_ : catfile($opt{root}, shift);
 }
 
+sub correct_sheet_name {
+  my $n = shift;
+  if (length $n) {
+
+    # no more than 31, and no special chars
+    $n = substr $n, -31 if length $n > 31;
+    $n =~ s|[\[\]\*\?:/\\]|.|g;
+  }
+  return $n;
+}
+
+sub correct_var_name {
+  my $n = shift;
+  $n =~ s/^\d+//;
+  $n =~ s/[^0-9a-zA-Z]/_/g;
+  return join('', map { +ucfirst } split(/_+/, $n));
+}
+
 sub get_temp_dir { return tempdir(CLEANUP => 1) }
 
 sub checkout_to {
@@ -329,8 +347,8 @@ sub repo_to_xls {
   my ($row,   $col);
   my (@head,  @width);
 
-  my $SN = sub { (my $n = $sheet_name{$_[0]}) =~ s|[\[\]\*\?:/\\]|.|g; $n };
-  my $TN = sub { 'Tb' . ucfirst $SN->($_[0]) };
+  my $SN = sub { correct_sheet_name($sheet_name{$_[0]}) };
+  my $TN = sub { 'Tb' . correct_var_name($SN->($_[0])) };
   my $NEW_SHEET = sub {
     ($row, $col) = (0, 0);
     $worksheet = $workbook->add_worksheet($SN->($sheet));
@@ -998,8 +1016,8 @@ sub db_to_xls {
   my ($row,   $col);
   my (@head,  @width);
 
-  my $SN = sub { (my $n = $sheet_name{$_[0]}) =~ s|[\[\]\*\?:/\\]|.|g; $n };
-  my $TN = sub { 'Tb' . ucfirst $SN->($_[0]) };
+  my $SN = sub { correct_sheet_name($sheet_name{$_[0]}) };
+  my $TN = sub { 'Tb' . correct_var_name($SN->($_[0])) };
   my $NEW_SHEET = sub {
     ($row, $col) = (0, 0);
     $worksheet = $workbook->add_worksheet($SN->($sheet));
