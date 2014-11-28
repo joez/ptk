@@ -498,13 +498,23 @@ sub resolve_query {
 
 sub get_resolved_repo {
   my $db = shift or die;
-  my $p  = shift or die;
+  my $pn = shift or die;
 
-  my $dr = $db->{default}{remote};
-  my $d  = {%{$db->{remote}{$dr}}, %{$db->{default}}};
-  my $r  = $db->{project}{data}{$p};
+  my $d = {%{$db->{default}}};
+  if (my $dr = $d->{remote}) {
+    my $r = {%{$db->{remote}{$dr}}};
+    delete $r->{name};
+    $d = {%$d, %$r};
+  }
 
-  return {%$d, %$r};
+  my $p = {%{$db->{project}{data}{$pn}}};
+  if (my $pr = $p->{remote}) {
+    my $r = {%{$db->{remote}{$pr}}};
+    delete $r->{name};
+    $p = {%$p, %$r};
+  }
+
+  return {%$d, %$p};
 }
 
 sub match_repo {
