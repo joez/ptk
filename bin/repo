@@ -28,6 +28,7 @@ use File::Temp qw/tempdir/;
 use IO::File;
 use Storable qw/nstore retrieve/;
 use Text::ParseWords;
+use Digest::MD5 qw/md5_hex/;
 
 use Ptk::Base::Log;
 my $log = Ptk::Base::Log->new;
@@ -254,7 +255,9 @@ sub correct_sheet_name {
   if (length $n) {
 
     # no more than 31, and no special chars
-    $n = substr $n, -31 if length $n > 31;
+    if (length $n > 31) {
+      $n = join('-', substr(md5_hex($n), -4), substr($n, -26));
+    }
     $n =~ s|[\[\]\*\?:/\\]|.|g;
   }
   return $n;
