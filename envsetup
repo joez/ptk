@@ -39,7 +39,7 @@ else
     export PTK_LIB=$PTK_HOME/lib
 
     # log level: [debug, info, warn, error, fatal]
-    export PTK_LOG_LEVEL=warn
+    export PTK_LOG_LEVEL=info
 
     export PATH=$PTK_BIN:$PATH
     export PERL5LIB=$PTK_LIB:$PERL5LIB
