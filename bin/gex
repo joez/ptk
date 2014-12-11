@@ -22,10 +22,9 @@ use System::Command;
 use Getopt::Long;
 use File::Path qw/make_path/;
 use File::Basename;
-use File::Spec::Functions qw/catdir catfile/;
+use File::Spec::Functions qw/catdir catfile rel2abs/;
 use File::Find 'find';
 use File::Temp qw/tempdir/;
-use IO::File;
 use Storable qw/nstore retrieve/;
 use Text::ParseWords;
 use Digest::MD5 qw/md5_hex/;
@@ -46,6 +45,7 @@ SYNOPSIS
     $script report-repo [<options>] [<src>...]
 
     $script forall [<options>] [<src>...]
+    $script format-patch [<options>] [<src>...]
     $script match-cherry [<options>] <this> <that> [<src>...]
 
     $script find-repo [<src>...]
@@ -83,6 +83,12 @@ COMMAND
     $script forall [-c <command>] [<src>...]
       run a Git command in each Git repo
       <command>: the Git command without "git", default is "status"
+      <src>:     relative Git repo paths
+
+    $script format-patch [-r <root>] [-q <query>] [-o <outdir>] [<src>...]
+      format-patch for each repo into output directory
+      <query>:   the parameters for "git format-patch", default is "-1"
+      <out-dir>: the output directory, default is "patch"
       <src>:     relative Git repo paths
 
     $script match-cherry [-r <root>] <this> <that> [<src>...]
@@ -161,6 +167,10 @@ EXAMPLES
       Git repos in "repo-list.txt" into "sync.xlsx", which means commits
       need to be cherry-picked
 
+    11. $script format-patch -q up..HEAD repo-list.txt
+      format-patch from up to HEAD for each repo in repo-list.txt, save
+      the patches into "../patch" directory
+
 NOTES
     * all the Git repo paths are assumed relative to the root,
       if a path pointing to a existing file, it will be regarded as a
@@ -180,6 +190,7 @@ my %opt = (
   limit    => '',
   url      => '.repo/manifests',
   manifest => 'default.xml',
+  outdir   => '',
   command  => ''
 );
 
@@ -193,6 +204,7 @@ GetOptions(
   "url|u=s"      => \$opt{url},
   "manifest|m=s" => \$opt{manifest},
   "command|c=s"  => \$opt{command},
+  "outdir|o=s"   => \$opt{outdir},
 ) or usage();
 
 my $cmd = lc(shift || '');
@@ -206,6 +218,7 @@ my %cmdcbs = (
   "dump-repo"    => \&do_dump_repo,
   "match-cherry" => \&do_match_cherry,
   "forall"       => \&do_forall,
+  "format-patch" => \&do_format_patch,
 );
 
 my $cb = $cmdcbs{$cmd};
@@ -301,7 +314,7 @@ sub do_report_repo {
   $db->{meta}{info}{revision} = join ', ', @revs;
 
   for my $rev (@revs) {
-    $log->debug("processing: $rev");
+    $log->info("processing: $rev");
 
     my $dir = get_temp_dir();
     checkout_to($dir, $url, $rev);
@@ -560,7 +573,7 @@ sub do_forall {
 
   my ($ttl, $cnt) = (scalar(@repos), 1);
   for my $repo (@repos) {
-    $log->debug("[$cnt / $ttl] processing: $repo");
+    $log->info("[$cnt / $ttl] processing: $repo");
     $cnt++;
 
     for my $path (grep {-e} resolve_path($repo)) {
@@ -583,6 +596,49 @@ sub do_forall {
 
         $c->close;
       };
+    }
+  }
+}
+
+sub do_format_patch {
+  my $outdir = $opt{outdir} || 'patch';
+  my $query  = $opt{query}  || '-1';
+  my @repos  = resolve_list(@_);
+  my $root   = $opt{root}   || '.';
+
+  my ($ttl, $cnt) = (scalar(@repos), 1);
+  for my $repo (@repos) {
+    $log->info("[$cnt / $ttl] processing: $repo");
+    $cnt++;
+
+    my $source = catdir($root,   $repo);
+    my $target = catdir($outdir, $repo);
+
+    unless (-e $source) {
+      $log->warn("not exist, skip: $source");
+    }
+    else {
+      $log->info("output: $target");
+      make_path($target) unless -e $target;
+
+      for ($source) {
+        $source = catdir($source, '.git') unless /\.git$/;
+      }
+      my $r = Git::Repository->new(git_dir => $source);
+      my $c
+        = $r->command('format-patch', '-o', rel2abs($target), '-q', $query);
+      my $o = $c->stdout;
+      my $e = $c->stderr;
+
+      while (<$e>) {
+        print STDERR $_;
+      }
+
+      while (<$o>) {
+        print STDOUT $_;
+      }
+
+      $c->close;
     }
   }
 }
@@ -680,7 +736,7 @@ sub do_match_cherry {
     my $dr = $db->{$repo} || {};
     $db->{$repo} = $dr;
 
-    $log->debug("[$cnt / $ttl] processing: $repo");
+    $log->info("[$cnt / $ttl] processing: $repo");
     $cnt++;
 
     for my $path (grep {-e} resolve_path($repo)) {
@@ -737,7 +793,7 @@ sub do_report_log {
   my @repos = resolve_list(@_);
   my ($ttl, $cnt) = (scalar(@repos), 1);
   for my $p (@repos) {
-    $log->debug("[$cnt / $ttl] processing: $p");
+    $log->info("[$cnt / $ttl] processing: $p");
     $cnt++;
 
     parse_repo_log($db, $_, $p) for grep {-e} resolve_path($p);
@@ -760,7 +816,7 @@ sub do_report_sync {
   my @repos = resolve_list(@_);
   my ($ttl, $cnt) = (scalar(@repos), 1);
   for my $p (@repos) {
-    $log->debug("[$cnt / $ttl] processing: $p");
+    $log->info("[$cnt / $ttl] processing: $p");
     $cnt++;
 
     parse_repo_sync($db, $_, $p, $this, $that) for grep {-e} resolve_path($p);
