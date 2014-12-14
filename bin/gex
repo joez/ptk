@@ -322,9 +322,10 @@ sub do_report_repo {
     my $f = catfile($dir, $manifest);
     my $m = parse_manifest($f);
 
-    for my $p (sort @{$m->{project}{seen}}) {
-      my $r = get_resolved_repo($m, $p);
+    for my $n (sort @{$m->{project}{seen}}) {
+      my $r = get_resolved_repo($m, $n);
       if (match_repo($q, $r)) {
+        my $p = $r->{path};
         $db->{data}{$rev}{$p} = $r;
 
         $db->{meta}{$_}{$r->{$_}}++ for qw/path remote fetch review/;
@@ -559,9 +560,9 @@ sub do_dump_repo {
   for my $m (@manifests) {
     my $db = parse_manifest($m);
 
-    for my $p (sort @{$db->{project}{seen}}) {
-      my $r = get_resolved_repo($db, $p);
-      print $p if match_repo($q, $r);
+    for my $n (sort @{$db->{project}{seen}}) {
+      my $r = get_resolved_repo($db, $n);
+      print $r->{path} if match_repo($q, $r);
     }
   }
 }
@@ -1012,11 +1013,12 @@ sub parse_manifest {
   my $db = shift || {project => {seen => []}};
 
   my %xpath = (
-    manifest => '/manifest',
-    remote   => '/manifest/remote',
-    include  => '/manifest/include',
-    default  => '/manifest/default',
-    project  => '/manifest/project',
+    manifest         => '/manifest',
+    remote           => '/manifest/remote',
+    include          => '/manifest/include',
+    default          => '/manifest/default',
+    project          => '/manifest/project',
+    'remove-project' => '/manifest/remove-project',
   );
   my $rdr = XML::Reader->new($manifest, {mode => 'attr-in-hash'});
 
@@ -1041,8 +1043,19 @@ sub parse_manifest {
         $db->{default} = $attr;
       }
       elsif ($path eq $xpath{project}) {
-        $db->{project}{data}{$attr->{path}} = $attr;
-        push @{$db->{project}{seen}}, $attr->{path};
+        $db->{project}{data}{$attr->{name}} = $attr;
+        push @{$db->{project}{seen}}, $attr->{name};
+      }
+      elsif ($path eq $xpath{'remove-project'}) {
+        my $n = $attr->{name};
+        if (exists $db->{project}{data}{$n}) {
+          $log->debug("project removed: $n");
+          $db->{removed}{$n} = delete $db->{project}{data}{$n};
+          $db->{project}{seen} = [grep { $_ ne $n } @{$db->{project}{seen}}];
+        }
+        else {
+          $log->warn("cannot find project to be removed: $n");
+        }
       }
       else {
         $log->debug('skip node: ' . $rdr->path);
