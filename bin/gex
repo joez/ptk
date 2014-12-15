@@ -48,6 +48,8 @@ SYNOPSIS
     $script format-patch [<options>] [<src>...]
     $script match-cherry [<options>] <this> <that> [<src>...]
 
+    $script overlay-repo-rev [<options>] <this> <that> [<src>...]
+
     $script find-repo [<src>...]
     $script dump-repo [<options>] [<src>...]
 
@@ -97,6 +99,14 @@ COMMAND
       <this>: working branch
       <that>: remote branch, mostly upstream
       <src>:  relative Git repo paths
+
+    $script overlay-repo-rev <this> <that> [<src>...]
+      overlay each Git repo's revision defined in <this> manifest with
+      one defined in <that> manifest, generally <that> manifest is a
+      snapshot, by this way to pin some Git repo in a stable revision
+      <this>: the target manifest
+      <that>: the snapshot manifest to be applied
+      <src>:  the Git repo names
 
     $script find-repo [<src>...]
       find valid Git repo in the <src> directories and output the paths,
@@ -171,6 +181,10 @@ EXAMPLES
       format-patch from up to HEAD for each repo in repo-list.txt, save
       the patches into "../patch" directory
 
+    12. $script overlay-repo-rev default.xml snapshot.xml repo-list.txt
+      overlay repo's revision defined in default.xml with one defined in
+      snapshot.xml, only the repo name in "repo-list.txt" is applied
+
 NOTES
     * all the Git repo paths are assumed relative to the root,
       if a path pointing to a existing file, it will be regarded as a
@@ -211,14 +225,15 @@ my $cmd = lc(shift || '');
 usage() if $help || !$cmd;
 
 my %cmdcbs = (
-  "report-log"   => \&do_report_log,
-  "report-sync"  => \&do_report_sync,
-  "report-repo"  => \&do_report_repo,
-  "find-repo"    => \&do_find_repo,
-  "dump-repo"    => \&do_dump_repo,
-  "match-cherry" => \&do_match_cherry,
-  "forall"       => \&do_forall,
-  "format-patch" => \&do_format_patch,
+  "report-log"       => \&do_report_log,
+  "report-sync"      => \&do_report_sync,
+  "report-repo"      => \&do_report_repo,
+  "find-repo"        => \&do_find_repo,
+  "dump-repo"        => \&do_dump_repo,
+  "match-cherry"     => \&do_match_cherry,
+  "forall"           => \&do_forall,
+  "format-patch"     => \&do_format_patch,
+  "overlay-repo-rev" => \&do_overlay_repo_rev,
 );
 
 my $cb = $cmdcbs{$cmd};
@@ -642,6 +657,30 @@ sub do_format_patch {
       $c->close;
     }
   }
+}
+
+sub do_overlay_repo_rev {
+  my $this = shift or die;
+  die "cannot write file: $this" unless -w $this;
+  my $that = shift or die;
+  die "cannot read file: $that" unless -r $that;
+
+  my %wanted = map { ($_ => 1) } resolve_list(@_);
+
+  my $db = parse_manifest($that);
+  open my $fh, '<', $this or die;
+  while (<$fh>) {
+    if (/name="(.+?)"/) {
+      my $n = $1;
+      if (exists $wanted{$n} && exists $db->{project}{data}{$n}) {
+        my $rev = $db->{project}{data}{$n}{revision};
+        $log->debug("overlay $n revision to $rev");
+        s/revision="(.+?)"/revision="$rev"/;
+      }
+    }
+    print;
+  }
+  close $fh;
 }
 
 sub check_match_cherry {
