@@ -667,20 +667,25 @@ sub do_overlay_repo_rev {
 
   my %wanted = map { ($_ => 1) } resolve_list(@_);
 
+  my $da = parse_manifest($this);
   my $db = parse_manifest($that);
-  open my $fh, '<', $this or die;
-  while (<$fh>) {
+
+  local @ARGV = ($this, @{$da->{include}{seen}});
+  local $^I = '';
+  while (<>) {
     if (/name="(.+?)"/) {
       my $n = $1;
-      if (exists $wanted{$n} && exists $db->{project}{data}{$n}) {
+      if ($wanted{$n} && $db->{project}{data}{$n}) {
         my $rev = $db->{project}{data}{$n}{revision};
+
         $log->debug("overlay $n revision to $rev");
-        s/revision="(.+?)"/revision="$rev"/;
+        unless (s/revision="(.+?)"/revision="$rev"/) {
+          s|\s*?(/?>)\s*?$| revision="$rev" $1|;
+        }
       }
     }
     print;
   }
-  close $fh;
 }
 
 sub check_match_cherry {
@@ -1049,7 +1054,7 @@ sub parse_repo_sync {
 
 sub parse_manifest {
   my $manifest = shift or die;
-  my $db = shift || {project => {seen => []}};
+  my $db = shift || {include => {seen => []}, project => {seen => []}};
 
   my %xpath = (
     manifest         => '/manifest',
@@ -1070,6 +1075,7 @@ sub parse_manifest {
       if ($path eq $xpath{include}) {
         if ($attr->{name}) {
           my $m = catfile(dirname($manifest), $attr->{name});
+          push @{$db->{include}{seen}}, $m;
 
           # parse included manifest
           parse_manifest($m, $db);
