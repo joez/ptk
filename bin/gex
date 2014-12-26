@@ -17,7 +17,6 @@ use Encode qw/decode/;
 use Encode::Guess;
 
 use Git::Repository 'Log';
-use System::Command;
 
 use Getopt::Long;
 use File::Path qw/make_path/;
@@ -30,6 +29,8 @@ use Text::ParseWords;
 use Digest::MD5 qw/md5_hex/;
 
 use Ptk::Base::Log;
+use Ptk::Base::Chdir;
+
 my $log = Ptk::Base::Log->new;
 
 my $script = basename($0);
@@ -63,12 +64,12 @@ COMMAND
       <file>:  spreadsheet file path, default "log.xlsx"
       <src>:   relative git repo paths
 
-    $script report-sync [-r <root>] [-f <file>] [-l <limit>] <this>
+    $script report-sync [-r <root>] [-f <file>] [-b <base>] <this>
     <that> [<src>...]
       export commit list need to be synchronized from <that> to <this>
       as an spreadsheet
       <file>:  spreadsheet file path, default "sync.xlsx"
-      <limit>: up to and including <limit> are not reported on <that>
+      <base>:  up to and including <base> are not reported on <that>
       <this>:  working branch
       <that>:  remote branch, mostly upstream
       <src>:   relative Git repo paths
@@ -82,10 +83,22 @@ COMMAND
       <file>:     spreadsheet file path, default "manifest.xlsx"
       <src>:      manifest branches, default as HEAD
 
-    $script forall [-c <command>] [<src>...]
-      run a Git command in each Git repo
-      <command>: the Git command without "git", default is "status"
-      <src>:     relative Git repo paths
+    $script forall [-u <url>] [-m <manifest>] [-b <base>]
+    [-c <command>] [<src>...]
+      run the same shell command in each project, with cwd as current
+      project's work tree, environment variables are set:
+       * REPO_PROJECT: the name of the project
+       * REPO_PATH:    the path of the project
+       * REPO_REMOTE:  the name of the remote
+       * REPO_LREV:    the revision translated for local usage
+       * REPO_RREV:    the revision from the manifest
+       * REPO_BLREV:   the baseline revision translated for local usage
+       * REPO_BRREV:   the baseline revision from the manifest
+      <url>:      manifest repo url, default ".repo/manifests"
+      <manifest>: alternative manifest, default "default.xml"
+      <base>:     a snapshot manifest as the baseline
+      <command>:  the command to run, default is "git status"
+      <src>:      relative Git repo paths
 
     $script format-patch [-r <root>] [-q <query>] [-o <outdir>] [<src>...]
       format-patch for each repo into output directory
@@ -132,6 +145,9 @@ OPTIONS
 
     -m, --manifest
       the alternative manifest file to use, default is "default.xml"
+
+    -b, --base
+      the baseline, a snapshot manifest or revision
 
     -f, --file
       the output file path
@@ -201,7 +217,7 @@ my %opt = (
   root     => '.',
   query    => '',
   file     => '',
-  limit    => '',
+  base     => '',
   url      => '.repo/manifests',
   manifest => 'default.xml',
   outdir   => '',
@@ -214,7 +230,7 @@ GetOptions(
   "root|r=s"     => \$opt{root},
   "file|f=s"     => \$opt{file},
   "query|q=s"    => \$opt{query},
-  "limit|l=s"    => \$opt{limit},
+  "base|b=s"     => \$opt{base},
   "url|u=s"      => \$opt{url},
   "manifest|m=s" => \$opt{manifest},
   "command|c=s"  => \$opt{command},
@@ -582,38 +598,106 @@ sub do_dump_repo {
   }
 }
 
+sub get_local_rev {
+  my $rev = shift or die;
+
+  for ($rev) {
+    unless (m|^refs/| or /^[0-9a-f]{40}$/) {
+      $rev = 'origin/' . $rev;
+    }
+  }
+  return $rev;
+}
 
 sub do_forall {
-  my @cmd = shellwords($opt{command} || 'status');
+  my $cmd = $opt{command} || 'git status';
   my @repos = resolve_list(@_);
+
+  my ($dm, $db);
+  my $manifest = catfile(@opt{qw/url manifest/});
+  my $baseline = $opt{base};
+  if (-e $manifest) {
+    $dm = parse_manifest($manifest);
+  }
+  else {
+    $log->warn("can't access manifest: $manifest");
+  }
+  if (-e $baseline) {
+
+    $db = parse_manifest($baseline);
+  }
+  else {
+    $log->warn("can't access baseline: $baseline");
+  }
+
+  my @fail = ();
+  my @skip = ();
 
   my ($ttl, $cnt) = (scalar(@repos), 1);
   for my $repo (@repos) {
     $log->info("[$cnt / $ttl] processing: $repo");
     $cnt++;
+    print "#-- project: $repo\n";
 
-    for my $path (grep {-e} resolve_path($repo)) {
-      for ($path) {
-        $path = catdir($path, '.git') unless /\.git$/;
+    my $path    = resolve_path($repo);
+    my $git_dir = $path =~ /\.git$/ ? '.' : '.git';
+    my $env     = {GIT_DIR => $git_dir, REPO_PATH => $repo};
+
+    if ($dm) {
+      if (my $n = $dm->{project}{name}{$repo}) {
+        my $d = $dm->{project}{data}{$n};
+        my $r = $d->{revision};
+        my $l = get_local_rev($r);
+        $env->{REPO_PROJECT} = $d->{name};
+        $env->{REPO_REMOTE}  = $d->{remote};
+        $env->{REPO_LREV}    = $l;
+        $env->{REPO_RREV}    = $r;
       }
-      eval {
-        my $r = Git::Repository->new(git_dir => $path);
-        my $c = $r->command(@cmd);
-        my $o = $c->stdout;
-        my $e = $c->stderr;
-
-        while (<$e>) {
-          print STDERR $_;
-        }
-
-        while (<$o>) {
-          print STDOUT $_;
-        }
-
-        $c->close;
-      };
+      else {
+        $log->warn("can't find repo in manifest: $repo");
+      }
     }
+    if ($db) {
+      if ($db and my $n = $db->{project}{name}{$repo}) {
+        my $d = $dm->{project}{data}{$n};
+        my $r = $d->{revision};
+        my $l = get_local_rev($r);
+        $env->{REPO_BLREV} = $l;
+        $env->{REPO_BRREV} = $r;
+      }
+      else {
+        $log->warn("can't find repo in baseline: $repo");
+      }
+    }
+    $log->debug($env);
+
+    eval {
+      my $chdir = Ptk::Base::Chdir->new;
+      unless ($chdir->pushd($path)) {
+        $log->warn("fail to access $path, skip: $repo");
+        push @skip, $repo;
+      }
+      else {
+        local %ENV = (%ENV, %$env);
+
+        if (system($cmd)) {
+          $log->warn("fail to process: $repo");
+          push @fail, $repo;
+        }
+      }
+    };
   }
+
+  print <<EOF;
+#-- DONE
+Total $ttl projects processed
+EOF
+
+  print 'Total ', scalar @skip, ' projects skipped:', "\n";
+  print join("\n", @skip), "\n";
+
+  print 'Total ', scalar @fail, ' projects failed:', "\n";
+  print join("\n", @fail), "\n";
 }
 
 sub do_format_patch {
@@ -646,12 +730,12 @@ sub do_format_patch {
       my $o = $c->stdout;
       my $e = $c->stderr;
 
-      while (<$e>) {
-        print STDERR $_;
-      }
-
       while (<$o>) {
         print STDOUT $_;
+      }
+
+      while (<$e>) {
+        print STDERR $_;
       }
 
       $c->close;
@@ -850,11 +934,12 @@ sub do_report_log {
 sub do_report_sync {
   my $this = shift or usage();
   my $that = shift or usage();
+  my $base = $opt{base};
 
   my $dst = $opt{file} || 'sync.xlsx';
 
   my $db = {};
-  $db->{meta}{refs}{base} = $opt{limit};
+  $db->{meta}{refs}{base} = $base;
   $db->{meta}{refs}{this} = $this;
   $db->{meta}{refs}{that} = $that;
 
@@ -864,7 +949,8 @@ sub do_report_sync {
     $log->info("[$cnt / $ttl] processing: $p");
     $cnt++;
 
-    parse_repo_sync($db, $_, $p, $this, $that) for grep {-e} resolve_path($p);
+    parse_repo_sync($db, $_, $p, $this, $that, $base)
+      for grep {-e} resolve_path($p);
   }
 
   db_to_xls($dst, $db);
@@ -1011,6 +1097,7 @@ sub parse_repo_sync {
   my $repo = shift or die;
   my $this = shift or die;
   my $that = shift or die;
+  my $base = shift || '';
 
   for ($path) {
     $path = catdir($path, '.git') unless /\.git$/;
@@ -1020,7 +1107,7 @@ sub parse_repo_sync {
     $log->info($path, $this, $that);
     my $m = {};
 
-    for ($r->run(shellwords "cherry $this $that $opt{limit}")) {
+    for ($r->run(shellwords "cherry $this $that $base")) {
       if (/^\+\s*(.+)$/) {
         my $id = $1;
 
@@ -1056,6 +1143,12 @@ sub parse_manifest {
   my $manifest = shift or die;
   my $db = shift || {include => {seen => []}, project => {seen => []}};
 
+  $log->debug('parse manifest: ' . $manifest);
+  unless (-e $manifest) {
+    $log->warn("can't access manifest: $manifest");
+    return $db;
+  }
+
   my %xpath = (
     manifest         => '/manifest',
     remote           => '/manifest/remote',
@@ -1066,7 +1159,6 @@ sub parse_manifest {
   );
   my $rdr = XML::Reader->new($manifest, {mode => 'attr-in-hash'});
 
-  $log->debug('parse manifest: ' . $manifest);
   while ($rdr->iterate) {
     if ($rdr->is_start) {
       my $path = $rdr->path;
@@ -1111,6 +1203,11 @@ sub parse_manifest {
 
     if ($rdr->is_end) {
     }
+  }
+
+  # path to name mapping
+  for my $v (values %{$db->{project}{data}}) {
+    $db->{project}{name}{$v->{path}} = $v->{name};
   }
 
   return $db;
