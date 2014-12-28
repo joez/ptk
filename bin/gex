@@ -366,8 +366,8 @@ sub do_report_repo {
     my $f = catfile($dir, $manifest);
     my $m = parse_manifest($f);
 
-    for my $n (sort @{$m->{project}{seen}}) {
-      my $r = get_resolved_repo($m, $n);
+    for my $n (sort get_project_list($m)) {
+      my $r = get_resolved_project($m, $n);
       if (match_repo($q, $r)) {
         my $p = $r->{path};
         $db->{data}{$rev}{$p} = $r;
@@ -557,9 +557,31 @@ sub resolve_query {
   return \%queries;
 }
 
-sub get_resolved_repo {
+sub get_project_list { @{$_[0]->{project}{seen}} }
+
+sub get_project {
   my $db = shift or die;
   my $pn = shift or die;
+
+  # first by name, then by path
+  my $r;
+  if (exists $db->{project}{data}{$pn}) {
+    $r = $db->{project}{data}{$pn};
+  }
+  elsif (exists $db->{project}{name}{$pn}) {
+    my $n = $db->{project}{name}{$pn};
+    $r = $db->{project}{data}{$n};
+  }
+
+  return $r;
+}
+
+sub get_resolved_project {
+  my $db = shift or die;
+  my $pn = shift or die;
+
+  my $proj = get_project($db, $pn);
+  return $proj unless $proj;
 
   my $d = {%{$db->{default}}};
   if (my $dr = $d->{remote}) {
@@ -568,7 +590,7 @@ sub get_resolved_repo {
     $d = {%$d, %$r};
   }
 
-  my $p = {%{$db->{project}{data}{$pn}}};
+  my $p = {%$proj};
   if (my $pr = $p->{remote}) {
     my $r = {%{$db->{remote}{$pr}}};
     delete $r->{name};
@@ -604,8 +626,8 @@ sub do_dump_repo {
   for my $m (@manifests) {
     my $db = parse_manifest($m);
 
-    for my $n (sort @{$db->{project}{seen}}) {
-      my $r = get_resolved_repo($db, $n);
+    for my $n (sort get_project_list($db)) {
+      my $r = get_resolved_project($db, $n);
       print $r->{path} if match_repo($q, $r);
     }
   }
@@ -643,7 +665,6 @@ sub do_forall {
   }
 
   my @fail = ();
-  my @skip = ();
 
   my ($ttl, $cnt) = (scalar(@repos), 1);
   for my $repo (@repos) {
@@ -656,26 +677,20 @@ sub do_forall {
     my $env     = {GIT_DIR => $git_dir, REPO_PATH => $repo};
 
     if ($dm) {
-      if (my $n = $dm->{project}{name}{$repo}) {
-        my $d = $dm->{project}{data}{$n};
-        my $r = $d->{revision};
-        my $l = get_local_rev($r);
+      if (my $d = get_resolved_project($dm, $repo)) {
         $env->{REPO_PROJECT} = $d->{name};
         $env->{REPO_REMOTE}  = $d->{remote};
-        $env->{REPO_LREV}    = $l;
-        $env->{REPO_RREV}    = $r;
+        $env->{REPO_RREV}    = $d->{revision};
+        $env->{REPO_LREV}    = get_local_rev($d->{revision});
       }
       else {
         $log->warn("can't find repo in manifest: $repo");
       }
     }
     if ($db) {
-      if (my $n = $db->{project}{name}{$repo}) {
-        my $d = $dm->{project}{data}{$n};
-        my $r = $d->{revision};
-        my $l = get_local_rev($r);
-        $env->{REPO_BLREV} = $l;
-        $env->{REPO_BRREV} = $r;
+      if (my $d = get_resolved_project($db, $repo)) {
+        $env->{REPO_BRREV} = $d->{revision};
+        $env->{REPO_BLREV} = get_local_rev($d->{revision});
       }
       else {
         $log->warn("can't find repo in baseline: $repo");
@@ -687,7 +702,7 @@ sub do_forall {
       my $chdir = Ptk::Base::Chdir->new;
       unless ($chdir->pushd($path)) {
         $log->warn("fail to access $path, skip: $repo");
-        push @skip, $repo;
+        push @fail, $repo;
       }
       else {
         local %ENV = (%ENV, %$env);
@@ -705,10 +720,7 @@ sub do_forall {
 Total $ttl projects processed
 EOF
 
-  print 'Total ', scalar @skip, ' projects skipped:', "\n";
-  print join("\n", @skip), "\n";
-
-  print 'Total ', scalar @fail, ' projects failed:', "\n";
+  print 'Total ', scalar @fail, ' projects are failed:', "\n";
   print join("\n", @fail), "\n";
 }
 
@@ -736,8 +748,7 @@ sub do_tag {
 
     my $rev = 'HEAD';
     if ($db) {
-      if (my $n = $db->{project}{name}{$repo}) {
-        my $d   = $db->{project}{data}{$n};
+      if (my $d = get_resolved_project($db, $repo)) {
         my $rev = get_local_rev($d->{revision});
       }
       else {
@@ -749,7 +760,7 @@ sub do_tag {
 
     my $chdir = Ptk::Base::Chdir->new;
     unless ($chdir->pushd($path)) {
-      $log->warn("fail to access $path");
+      $log->warn("fail to access $path, skip $repo");
       push @fail, $repo;
     }
     else {
@@ -766,7 +777,7 @@ sub do_tag {
 Total $ttl projects processed
 EOF
 
-  print 'Total ', scalar @fail, ' projects failed:', "\n";
+  print 'Total ', scalar @fail, ' projects are failed:', "\n";
   print join("\n", @fail), "\n";
 }
 
@@ -827,10 +838,11 @@ sub do_overlay_repo_rev {
   local @ARGV = ($this, @{$da->{include}{seen}});
   local $^I = '';
   while (<>) {
-    if (/name="(.+?)"/) {
+    if (/name="(.+?)"/ or /path="(.+?)"/) {
       my $n = $1;
-      if ($wanted{$n} && $db->{project}{data}{$n}) {
-        my $rev = $db->{project}{data}{$n}{revision};
+      my $d = get_resolved_project($db, $n);
+      if ($wanted{$n} && $d) {
+        my $rev = $d->{revision};
 
         $log->debug("overlay $n revision to $rev");
         unless (s/revision="(.+?)"/revision="$rev"/) {
