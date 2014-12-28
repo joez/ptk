@@ -43,7 +43,7 @@ NAME
 SYNOPSIS
     $script report-log [<options>] [<src>...]
     $script report-sync [<options>] <this> <that> [<src>...]
-    $script report-repo [<options>] [<src>...]
+    $script report-manifest [<options>] [<src>...]
 
     $script forall [<options>] [<src>...]
     $script tag [<options>] <tag> [<src>...]
@@ -75,7 +75,7 @@ COMMAND
       <that>:  remote branch, mostly upstream
       <src>:   relative Git repo paths
 
-    $script report-repo [-u <url>] [-m <manifest>] [-f <file>]
+    $script report-manifest [-u <url>] [-m <manifest>] [-f <file>]
     [-q <query>] [<src>...]
       export manifest information into spreadsheet
       <url>:      manifest repo url, default ".repo/manifests"
@@ -84,7 +84,7 @@ COMMAND
       <file>:     spreadsheet file path, default "manifest.xlsx"
       <src>:      manifest branches, default as HEAD
 
-    $script forall [-u <url>] [-m <manifest>] [-b <base>]
+    $script forall [-r <root>] [-u <url>] [-m <manifest>]
     [-c <command>] [<src>...]
       run the same shell command in each repo, with cwd as current
       repo's work tree, environment variables are set:
@@ -93,11 +93,8 @@ COMMAND
        * REPO_REMOTE:  the name of the remote
        * REPO_LREV:    the revision translated for local usage
        * REPO_RREV:    the revision from the manifest
-       * REPO_BLREV:   the baseline revision translated for local usage
-       * REPO_BRREV:   the baseline revision from the manifest
       <url>:      manifest repo url, default ".repo/manifests"
       <manifest>: alternative manifest, default "default.xml"
-      <base>:     snapshot manifest as the baseline
       <command>:  command to run, default is "git status"
       <src>:      relative Git repo paths
 
@@ -153,9 +150,6 @@ OPTIONS
 
     -m, --manifest
       the alternative manifest file to use, default is "default.xml"
-
-    -b, --base
-      the baseline, a snapshot manifest or revision
 
     -f, --file
       the output file path
@@ -255,7 +249,7 @@ usage() if $help || !$cmd;
 my %cmdcbs = (
   "report-log"       => \&do_report_log,
   "report-sync"      => \&do_report_sync,
-  "report-repo"      => \&do_report_repo,
+  "report-manifest"  => \&do_report_manifest,
   "find-repo"        => \&do_find_repo,
   "dump-repo"        => \&do_dump_repo,
   "match-cherry"     => \&do_match_cherry,
@@ -341,11 +335,11 @@ sub checkout_to {
   return $r->run(qw/reset --hard/, $rev);
 }
 
-sub do_report_repo {
+sub do_report_manifest {
   my @revs = @_;
   unshift @revs, 'HEAD' unless @revs;
 
-  my $dst      = $opt{file} || 'repo.xlsx';
+  my $dst      = $opt{file} || 'manifest.xlsx';
   my $url      = $opt{url};
   my $manifest = $opt{manifest};
   my $query    = $opt{query};
@@ -648,20 +642,13 @@ sub do_forall {
   my $cmd = $opt{command} || 'git status';
   my @repos = resolve_list(@_);
 
-  my ($dm, $db);
+  my $db;
   my $manifest = catfile(@opt{qw/url manifest/});
-  my $baseline = $opt{base};
   if (-e $manifest) {
-    $dm = parse_manifest($manifest);
+    $db = parse_manifest($manifest);
   }
   else {
     $log->warn("can't access manifest: $manifest");
-  }
-  if (-e $baseline) {
-    $db = parse_manifest($baseline);
-  }
-  else {
-    $log->warn("can't access baseline: $baseline");
   }
 
   my @fail = ();
@@ -676,8 +663,8 @@ sub do_forall {
     my $git_dir = $path =~ /\.git$/ ? '.' : '.git';
     my $env     = {GIT_DIR => $git_dir, REPO_PATH => $repo};
 
-    if ($dm) {
-      if (my $d = get_resolved_project($dm, $repo)) {
+    if ($db) {
+      if (my $d = get_resolved_project($db, $repo)) {
         $env->{REPO_PROJECT} = $d->{name};
         $env->{REPO_REMOTE}  = $d->{remote};
         $env->{REPO_RREV}    = $d->{revision};
@@ -685,15 +672,6 @@ sub do_forall {
       }
       else {
         $log->warn("can't find repo in manifest: $repo");
-      }
-    }
-    if ($db) {
-      if (my $d = get_resolved_project($db, $repo)) {
-        $env->{REPO_BRREV} = $d->{revision};
-        $env->{REPO_BLREV} = get_local_rev($d->{revision});
-      }
-      else {
-        $log->warn("can't find repo in baseline: $repo");
       }
     }
     $log->debug($env);
