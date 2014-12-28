@@ -42,7 +42,7 @@ NAME
 
 SYNOPSIS
     $script report-log [<options>] [<src>...]
-    $script report-sync [<options>] <this> <that> [<src>...]
+    $script report-delta [<options>] <this> <that> [<src>...]
     $script report-manifest [<options>] [<src>...]
 
     $script forall [<options>] [<src>...]
@@ -50,7 +50,7 @@ SYNOPSIS
     $script format-patch [<options>] [<src>...]
     $script match-cherry [<options>] <this> <that> [<src>...]
 
-    $script overlay-repo-rev [<options>] <this> <that> [<src>...]
+    $script overlay-manifest [<options>] <this> <that> [<src>...]
 
     $script find-repo [<src>...]
     $script dump-repo [<options>] [<src>...]
@@ -65,11 +65,11 @@ COMMAND
       <file>:  spreadsheet file path, default "log.xlsx"
       <src>:   relative git repo paths
 
-    $script report-sync [-r <root>] [-f <file>] [-b <base>] <this>
+    $script report-delta [-r <root>] [-f <file>] [-b <base>] <this>
     <that> [<src>...]
-      export commit list need to be synchronized from <that> to <this>
+      export commit list need to be integrated from <that> to <this>
       as an spreadsheet
-      <file>:  spreadsheet file path, default "sync.xlsx"
+      <file>:  spreadsheet file path, default "delta.xlsx"
       <base>:  up to and including <base> are not reported on <that>
       <this>:  working branch
       <that>:  remote branch, mostly upstream
@@ -118,13 +118,13 @@ COMMAND
       <that>: remote branch, mostly upstream
       <src>:  relative Git repo paths
 
-    $script overlay-repo-rev <this> <that> [<src>...]
+    $script overlay-manifest <this> <that> [<src>...]
       overlay each Git repo's revision defined in <this> manifest with
       one defined in <that> manifest, generally <that> manifest is a
       snapshot, by this way to pin some Git repo in a stable revision
       <this>: the target manifest
       <that>: the snapshot manifest to be applied
-      <src>:  the Git repo names
+      <src>:  the Git repo paths or names
 
     $script find-repo [<src>...]
       find valid Git repo in the <src> directories and output the paths,
@@ -190,16 +190,16 @@ EXAMPLES
       find all the commit with same changeset but different commit id,
       between "develop" and "upstream" of Git repos in "repo-list.txt"
 
-    10. $script report-sync develop upstream repo-list.txt
+    10. $script report-delta develop upstream repo-list.txt
       export all the commit list only exist in the "upstream" branch of
-      Git repos in "repo-list.txt" into "sync.xlsx", which means commits
+      Git repos in "repo-list.txt" into "delta.xlsx", these commits
       need to be cherry-picked
 
-    11. $script format-patch -q up..HEAD repo-list.txt
-      format-patch from up to HEAD for each repo in repo-list.txt, save
-      the patches into "../patch" directory
+    11. $script format-patch -q BASE..HEAD repo-list.txt
+      format-patch from BASE to HEAD for each repo in repo-list.txt,
+      save the patches into "../patch" directory
 
-    12. $script overlay-repo-rev default.xml snapshot.xml repo-list.txt
+    12. $script overlay-manifest default.xml snapshot.xml repo-list.txt
       overlay repo's revision defined in default.xml with one defined in
       snapshot.xml, only the repo name in "repo-list.txt" is applied
 
@@ -248,7 +248,7 @@ usage() if $help || !$cmd;
 
 my %cmdcbs = (
   "report-log"       => \&do_report_log,
-  "report-sync"      => \&do_report_sync,
+  "report-delta"     => \&do_report_delta,
   "report-manifest"  => \&do_report_manifest,
   "find-repo"        => \&do_find_repo,
   "dump-repo"        => \&do_dump_repo,
@@ -256,7 +256,7 @@ my %cmdcbs = (
   "forall"           => \&do_forall,
   "tag"              => \&do_tag,
   "format-patch"     => \&do_format_patch,
-  "overlay-repo-rev" => \&do_overlay_repo_rev,
+  "overlay-manifest" => \&do_overlay_manifest,
 );
 
 my $cb = $cmdcbs{$cmd};
@@ -802,7 +802,7 @@ sub do_format_patch {
   }
 }
 
-sub do_overlay_repo_rev {
+sub do_overlay_manifest {
   my $this = shift or die;
   die "cannot write file: $this" unless -w $this;
   my $that = shift or die;
@@ -991,12 +991,12 @@ sub do_report_log {
   db_to_xls($dst, $db);
 }
 
-sub do_report_sync {
+sub do_report_delta {
   my $this = shift or usage();
   my $that = shift or usage();
   my $base = $opt{base};
 
-  my $dst = $opt{file} || 'sync.xlsx';
+  my $dst = $opt{file} || 'delta.xlsx';
 
   my $db = {};
   $db->{meta}{refs}{base} = $base;
@@ -1009,7 +1009,7 @@ sub do_report_sync {
     $log->info("[$cnt / $ttl] processing: $p");
     $cnt++;
 
-    parse_repo_sync($db, $_, $p, $this, $that, $base)
+    parse_repo_delta($db, $_, $p, $this, $that, $base)
       for grep {-e} resolve_path($p);
   }
 
@@ -1151,7 +1151,7 @@ sub get_commit_info {
   return $d;
 }
 
-sub parse_repo_sync {
+sub parse_repo_delta {
   my $db   = shift or die;
   my $path = shift or die;
   my $repo = shift or die;
