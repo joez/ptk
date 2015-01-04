@@ -359,8 +359,7 @@ sub do_report_manifest {
 
     my $f = catfile($dir, $manifest);
     my $m = parse_manifest($f);
-
-    for my $n (sort get_project_list($m)) {
+    for my $n (sort +get_project_list($m)) {
       my $r = get_resolved_project($m, $n);
       if (match_repo($q, $r)) {
         my $p = $r->{path};
@@ -620,7 +619,7 @@ sub do_dump_repo {
   for my $m (@manifests) {
     my $db = parse_manifest($m);
 
-    for my $n (sort get_project_list($db)) {
+    for my $n (sort +get_project_list($db)) {
       my $r = get_resolved_project($db, $n);
       print $r->{path} if match_repo($q, $r);
     }
