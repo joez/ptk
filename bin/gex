@@ -726,7 +726,7 @@ sub do_tag {
     my $rev = 'HEAD';
     if ($db) {
       if (my $d = get_resolved_project($db, $repo)) {
-        my $rev = get_local_rev($d->{revision});
+        $rev = get_local_rev($d->{revision});
       }
       else {
         $log->warn("can't find repo in baseline: $repo");
@@ -742,7 +742,10 @@ sub do_tag {
     }
     else {
       local %ENV = (%ENV, GIT_DIR => $git_dir);
-      if (system("git tag $name $rev")) {
+      my $cmd = "git tag $name $rev";
+      $log->info($cmd);
+
+      if (system($cmd)) {
         $log->warn("fail to process: $repo");
         push @fail, $repo;
       }
