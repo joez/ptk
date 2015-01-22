@@ -136,7 +136,8 @@ COMMAND
       <query>: dump repo matching the query only, the query format is
         queries separated by ',', each query is a key-value pair
         separeated by ':', the key is the attribute of the repo definition
-        and the value is a substring to match. e.g. "revision:master"
+        and the value is a regex to match. e.g. "revision:master"
+        prefix with '!' for negative match, e.g. "!group:aosp,path:vendor"
       <src>:   manifests to dump, default is ".repo/manifests/default.xml"
 
 OPTIONS
@@ -361,7 +362,7 @@ sub do_report_manifest {
     my $m = parse_manifest($f);
     for my $n (sort +get_project_list($m)) {
       my $r = get_resolved_project($m, $n);
-      if (match_repo($q, $r)) {
+      if (match_repo($r, $q)) {
         my $p = $r->{path};
         $db->{data}{$rev}{$p} = $r;
 
@@ -536,20 +537,6 @@ sub do_find_repo {
   print $_ foreach sort keys %seen;
 }
 
-sub resolve_query {
-  my %queries = ();
-
-  for (@_) {
-    chomp;
-    for (split /\s*[,]\s*/) {
-      my ($k, $v) = split /[:]/;
-      $queries{$k} = qr/$v/i;
-    }
-  }
-
-  return \%queries;
-}
-
 sub get_project_list { @{$_[0]->{project}{seen}} }
 
 sub get_project {
@@ -593,18 +580,48 @@ sub get_resolved_project {
   return {%$d, %$p};
 }
 
-sub match_repo {
-  my $query = shift or die;
-  my $repo  = shift or die;
+sub resolve_query {
+  my @queries = ();
 
-  for my $k (keys %{$query}) {
-    my $q = $query->{$k};
-    my $v = $repo->{$k} || '';
+  for (@_) {
+    chomp;
+    my @query = ();
 
-    return 0 unless $v =~ $q;
+    for (split /\s*[,]\s*/) {
+      my ($k, $v) = split /[:]/;
+      my $reverse = ($k =~ s/^!\s*//);
+
+      my $item = {k => $k, q => qr/$v/i, r => $reverse,};
+      push @query, $item;
+    }
+
+    push @queries, \@query;
   }
 
-  return 1;
+  return \@queries;
+}
+
+sub match_repo {
+  my $repo    = shift or die;
+  my $queries = shift or die;
+
+  # there are multiple query items in the $query
+  # if one of the items match, the result is true
+  # if all the items fail to match, the result is false
+  #
+  # for each item, there are multiple keys to match
+  # if one of the key is not match, the whole item fails
+ITEM: for my $query (@$queries) {
+    for my $item (@$query) {
+      my ($k, $q, $r) = @{$item}{qw/k q r/};
+      my $v = $repo->{$k} || '';
+
+      next ITEM unless ($r ? $v !~ $q : $v =~ $q);
+    }
+    return 1;
+  }
+
+  return @$queries ? 0 : 1;
 }
 
 sub do_dump_repo {
@@ -621,7 +638,7 @@ sub do_dump_repo {
 
     for my $n (sort +get_project_list($db)) {
       my $r = get_resolved_project($db, $n);
-      print $r->{path} if match_repo($q, $r);
+      print $r->{path} if match_repo($r, $q);
     }
   }
 }
@@ -1269,6 +1286,9 @@ sub parse_manifest {
 
   # path to name mapping
   for my $v (values %{$db->{project}{data}}) {
+
+    # there is no "path" defined for mirror project
+    $v->{path} = $v->{name} unless $v->{path};
     $db->{project}{name}{$v->{path}} = $v->{name};
   }
 
