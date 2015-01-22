@@ -11,7 +11,7 @@ use File::Basename qw/dirname/;
 
 use Mojo::Util qw/encode/;
 
-has dumper => sub { Data::Dumper->new([])->Terse(1)->Indent(0)->Pair(':') };
+has dumper => sub { Data::Dumper->new([])->Terse(1)->Deepcopy(1)->Indent(0)->Pair(':') };
 has append => 1;
 
 my $LEVEL = {debug => 1, info => 2, warn => 3, error => 4, fatal => 5};
