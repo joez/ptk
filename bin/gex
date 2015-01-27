@@ -961,7 +961,7 @@ sub do_match_cherry {
           my $side = substr($_, 0, 1) eq '<' ? $this : $that;
           my $id = substr $_, 1;
 
-          my $d = get_commit_info($r, $id);
+          my $d = get_commit_info(git_log($r, "-1", $id)->next);
           $d->{branch} = $side;
           $d->{repo}   = $repo;
 
@@ -1035,6 +1035,52 @@ sub do_report_delta {
   db_to_xls($dst, $db);
 }
 
+sub parse_repo_log {
+  my $db   = shift or die;
+  my $path = shift or die;
+  my $repo = shift or die;
+  my $query = $opt{query} || '--';
+
+  for ($path) {
+    $path = catdir($path, '.git') unless /\.git$/;
+  }
+  eval {
+    my $r = Git::Repository->new(git_dir => $path);
+    my $i = git_log($r, shellwords $opt{query});
+
+    $log->info($path, $opt{query});
+    while (my $l = $i->next) {
+      my $d = get_commit_info($l);
+      $d->{repo} = $repo;
+      $log->info($d->{commit});
+
+      push @{$db->{data}{$repo}{id}}, $d->{commit};
+      $db->{data}{$repo}{data}{$d->{commit}} = $d;
+    }
+  };
+}
+
+sub get_patch_id {
+  my $repo = shift;
+  my $id   = shift;
+
+  my $cmd = $repo->command('patch-id');
+  my $fi  = $cmd->stdin;
+  my $fo  = $cmd->stdout;
+
+  my $fd = $repo->command('show', $id)->stdout;
+  while (<$fd>) {
+    print $fi $_;
+  }
+  close $fi;
+
+  my $patch_id = (split ' ', <$fo>)[0];
+  $cmd->close;
+
+  return $patch_id;
+}
+
+
 sub parse_commit_message {
   my $m = shift;
   my $d = {};
@@ -1085,74 +1131,36 @@ sub parse_commit_message {
 
   }
 
-  #$log->debug($d);
+  $log->debug($d);
 
   return $d;
 }
 
-sub parse_repo_log {
-  my $db   = shift or die;
-  my $path = shift or die;
-  my $repo = shift or die;
-  my $query = $opt{query} || '--';
+sub parse_commit_extra {
+  my $m = shift;
+  my $d = {};
 
-  for ($path) {
-    $path = catdir($path, '.git') unless /\.git$/;
-  }
-  eval {
-    my $r = Git::Repository->new(git_dir => $path);
-    my $i = $r->log(shellwords $opt{query});
+  foreach (split "\n", $m) {
+    chomp;
+    next unless $_;
 
-    $log->info($path, $opt{query});
-    while (my $l = $i->next) {
-      my $d = {
-        repo            => $repo,
-        commit          => $l->commit,
-        author_name     => $l->author_name,
-        author_email    => $l->author_email,
-        author_time     => $l->author_localtime,
-        committer_name  => $l->committer_name,
-        committer_email => $l->committer_email,
-        committer_time  => $l->committer_localtime,
-        subject         => $l->subject,
-        body            => $l->body,
-      };
-      $log->info($d->{commit});
-
-      $d = {%$d, %{parse_commit_message($d->{body})}};
-
-      push @{$db->{data}{$repo}{id}}, $d->{commit};
-      $db->{data}{$repo}{data}{$d->{commit}} = $d;
+    # files and status, see git log --name-status
+    if (/^([ACDMRTUXB]+)\s+(.+)$/) {
+      $d->{name_status}{$2} = $1;
     }
-  };
-}
-
-sub get_patch_id {
-  my $repo = shift;
-  my $id   = shift;
-
-  my $cmd = $repo->command('patch-id');
-  my $fi  = $cmd->stdin;
-  my $fo  = $cmd->stdout;
-
-  my $fd = $repo->command('show', $id)->stdout;
-  while (<$fd>) {
-    print $fi $_;
   }
-  close $fi;
 
-  my $patch_id = (split ' ', <$fo>)[0];
-  $cmd->close;
+  $log->debug($d);
 
-  return $patch_id;
+  return $d;
 }
+
+sub git_log { shift->log('--name-status' => @_) }
 
 sub get_commit_info {
-  my $repo = shift;
-  my $id   = shift;
+  my $l = shift;
 
   my $d = {};
-  my $l = $repo->log("-1", $id)->next;
   $d = {
     commit          => $l->commit,
     author_name     => $l->author_name,
@@ -1163,7 +1171,7 @@ sub get_commit_info {
     committer_time  => $l->committer_localtime,
     subject         => $l->subject,
     body            => $l->body,
-    %{parse_commit_message($l->body)},
+    %{parse_commit_message($l->body)}, %{parse_commit_extra($l->extra)},
     }
     if $l;
 
@@ -1192,7 +1200,7 @@ sub parse_repo_delta {
 
         $log->info($id);
 
-        my $d = get_commit_info($r, $id);
+        my $d = get_commit_info(git_log($r, "-1", $id)->next);
         $d->{repo}   = $repo;
         $d->{branch} = $that;
 
@@ -1206,7 +1214,7 @@ sub parse_repo_delta {
     for ($r->run(qw/rev-list --no-merges --left-only/, "$this...$that")) {
       my $id = $_;
 
-      my $d = get_commit_info($r, $id);
+      my $d = get_commit_info(git_log($r, "-1", $id)->next);
       $d->{branch} = $this;
       $d->{repo}   = $repo;
 
@@ -1304,7 +1312,7 @@ sub db_to_xls {
   my $dst = shift or die;
   my $db  = shift or die;
 
-  my @sheets     = qw/data summary ticket reviewer match integrator meta/;
+  my @sheets     = qw/data summary file ticket reviewer match integrator meta/;
   my %sheet_name = map { ($_, $_) } @sheets;
   my %sheet_need = map { ($_, 1) } @sheets;
 
@@ -1313,6 +1321,7 @@ sub db_to_xls {
   my %author_email;
   my %id_ticket;
   my %id_reviewer;
+  my %id_file;
   my $name_match = 'MatchedCherries';
 
   my $workbook = Excel::Writer::XLSX->new($dst);
@@ -1370,6 +1379,10 @@ sub db_to_xls {
           my $l = join ',', $id, $_;
           $id_reviewer{$l}++;
         }
+        for (sort keys %{$d{name_status}}) {
+          my $l = join ',', $id, $repo, $_, $d{name_status}->{$_};
+          $id_file{$l}++;
+        }
 
         $d{committer_time} = format_date($d{committer_time});
         my @l = @d{@fields{@info}};
@@ -1404,6 +1417,18 @@ sub db_to_xls {
   # "summary" worksheet
   if ($NEED->($sheet = "summary")) {
     $worksheet = $workbook->add_worksheet($SN->($sheet));
+  }
+
+  # "file" worksheet
+  if ($NEED->($sheet = "file")) {
+    @head = qw/ID Repo File Status/;    # hardcoded, do not change
+    @width = (42, 46, 64, 8);
+
+    $NEW_SHEET->();
+    for my $l (sort keys %id_file) {
+      $worksheet->write_row($row++, 0, [split ',', $l]);
+    }
+    $NEW_TABLE->();
   }
 
   # "ticket" worksheet
