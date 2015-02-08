@@ -1,9 +1,6 @@
 #!/usr/bin/perl
 package main;
 
-use FindBin;
-use lib "$FindBin::RealBin/../lib";
-
 use Perl::Tidy;
 
 my $arg_string = undef;
@@ -144,7 +141,7 @@ The entire command line is scanned for options, and they are processed
 before any files are processed.  As a result, it does not matter
 whether flags are before or after any filenames.  However, the relative
 order of parameters is important, with later parameters overriding the
-values of earlier parameters.
+values of earlier parameters.  
 
 For each parameter, there is a long name and a short name.  The short
 names are convenient for keyboard input, while the long names are
@@ -153,7 +150,7 @@ use two leading dashes for long names, but one may be used.
 
 Most parameters which serve as on/off flags can be negated with a
 leading "n" (for the short name) or a leading "no" or "no-" (for the
-long name).  For example, the flag to outdent long quotes is is B<-olq>
+long name).  For example, the flag to outdent long quotes is B<-olq>
 or B<--outdent-long-quotes>.  The flag to skip this is B<-nolq>
 or B<--nooutdent-long-quotes> or B<--no-outdent-long-quotes>.
 
@@ -236,8 +233,13 @@ extension F<.bak>.  Any existing F<.bak> file will be deleted.  See next
 item for changing the default backup extension, and for eliminating the
 backup file altogether.  
 
-A B<-b> flag will be ignored if input is from standard input, or
-if the B<-html> flag is set. 
+A B<-b> flag will be ignored if input is from standard input or goes to
+standard output, or if the B<-html> flag is set.  
+
+In particular, if you want to use both the B<-b> flag and the B<-pbp>
+(--perl-best-practices) flag, then you must put a B<-nst> flag after the
+B<-pbp> flag because it contains a B<-st> flag as one of its components,
+which means that output will go to the standard output stream.
 
 =item	B<-bext>=ext,    B<--backup-file-extension>=ext  
 
@@ -368,6 +370,10 @@ set of F<.perltidyrc> files to avoid unwanted code tidying.  See also
 L<Skipping Selected Sections of Code> for a way to avoid tidying specific
 sections of code.
 
+=item B<-i=n>,  B<--indent-columns=n>  
+
+Use n columns per indentation level (default n=4).
+
 =item B<-l=n>, B<--maximum-line-length=n>
 
 The default maximum line length is n=80 characters.  Perltidy will try
@@ -375,9 +381,49 @@ to find line break points to keep lines below this length. However, long
 quotes and side comments may cause lines to exceed this length. 
 Setting B<-l=0> is equivalent to setting B<-l=(a large number)>. 
 
-=item B<-i=n>,  B<--indent-columns=n>  
+=item B<-vmll>, B<--variable-maximum-line-length>
 
-Use n columns per indentation level (default n=4).
+A problem arises using a fixed maximum line length with very deeply nested code
+and data structures because eventually the amount of leading whitespace used
+for indicating indentation takes up most or all of the available line width,
+leaving little or no space for the actual code or data.  One solution is to use
+a vary long line length.  Another solution is to use the B<-vmll> flag, which
+basically tells perltidy to ignore leading whitespace when measuring the line
+length.  
+
+To be precise, when the B<-vmll> parameter is set, the maximum line length of a
+line of code will be M+L*I, where
+
+      M is the value of --maximum-line-length=M (-l=M), default 80,
+      I is the value of --indent-columns=I (-i=I), default 4,
+      L is the indentation level of the line of code
+
+When this flag is set, the choice of breakpoints for a block of code should be
+essentially independent of its nesting depth.  However, the absolute line
+lengths, including leading whitespace, can still be arbitrarily large.  This
+problem can be avoided by including the next parameter.  
+
+The default is not to do this (B<-nvmll>).
+
+=item B<-wc=n>, B<--whitespace-cycle=n>
+
+This flag also addresses problems with very deeply nested code and data
+structures.  When the nesting depth exceeds the value B<n> the leading
+whitespace will be reduced and start at a depth of 1 again.  The result is that
+blocks of code will shift back to the left rather than moving arbitrarily far
+to the right.  This occurs cyclically to any depth.  
+
+For example if one level of indentation equals 4 spaces (B<-i=4>, the default),
+and one uses B<-wc=15>, then if the leading whitespace on a line exceeds about
+4*15=60 spaces it will be reduced back to 4*1=4 spaces and continue increasing
+from there.  If the whitespace never exceeds this limit the formatting remains
+unchanged.
+
+The combination of B<-vmll> and B<-wc=n> provides a solution to the problem of
+displaying arbitrarily deep data structures and code in a finite window,
+although B<-wc=n> may of course be used without B<-vmll>.
+
+The default is not to use this, which can also be indicated using B<-wc=0>.
 
 =item tabs
 
@@ -410,7 +456,7 @@ option.
 
 =item B<-dt=n>,   B<--default-tabsize=n>
 
-If the the first line of code passed to perltidy contains leading tabs but no
+If the first line of code passed to perltidy contains leading tabs but no
 tab scheme is specified for the output stream then perltidy must guess how many
 spaces correspond to each leading tab.  This number of spaces B<n>
 corresponding to each leading tab of the input stream may be specified with
@@ -457,10 +503,10 @@ exactly what flags were passed to perl.
 
 =item B<-io>,   B<--indent-only>       
 
-This flag is used to deactivate all formatting and line break changes
+This flag is used to deactivate all whitespace and line break changes
 within non-blank lines of code.
 When it is in effect, the only change to the script will be
-to the indentation and blank lines.
+to the indentation and to the number of blank lines.
 And any flags controlling whitespace and newlines will be ignored.  You
 might want to use this if you are perfectly happy with your whitespace
 and line breaks, and merely want perltidy to handle the indentation.
@@ -473,6 +519,11 @@ B<--freeze-whitespace>.
 
 If you also want to keep your existing blank lines exactly
 as they are, you can add B<--freeze-blank-lines>. 
+
+With this option perltidy is still free to modify the indenting (and
+outdenting) of code and comments as it normally would.  If you also want to
+prevent long comment lines from being outdented, you can add either B<-noll> or
+B<-l=0>.
 
 =item B<-ole=s>,  B<--output-line-ending=s>
 
@@ -695,7 +746,7 @@ Use B<-nola> to not outdent labels.
 
 =item B<-okw>,  B<--outdent-keywords>
 
-The command B<-okw> will will cause certain leading control keywords to
+The command B<-okw> will cause certain leading control keywords to
 be outdented by 2 spaces (or whatever B<-ci> has been set to), if
 possible.  By default, these keywords are C<redo>, C<next>, C<last>,
 C<goto>, and C<return>.  The intention is to make these control keywords
@@ -786,6 +837,23 @@ example below.
  %bf = map { $_ => -M $_ } grep { /\.deb$/ } dirents '.'; # -bbt=0 (default)
  %bf = map { $_ => -M $_ } grep {/\.deb$/} dirents '.';   # -bbt=1
  %bf = map {$_ => -M $_} grep {/\.deb$/} dirents '.';     # -bbt=2
+
+To simplify input in the case that all of the tightness flags have the same
+value <n>, the parameter <-act=n> or B<--all-containers-tightness=n> is an
+abbreviation for the combination <-pt=n -sbt=n -bt=n -bbt=n>.
+
+
+=item B<-tso>,   B<--tight-secret-operators>
+
+The flag B<-tso> causes certain perl token sequences (secret operators)
+which might be considered to be a single operator to be formatted "tightly"
+(without spaces).  The operators currently modified by this flag are: 
+
+     0+  +0  ()x!! ~~<>  ,=>   =( )=  
+
+For example the sequence B<0 +>,  which converts a string to a number,
+would be formatted without a space: B<0+> when the B<-tso> flag is set.  This
+flag is off by default.
 
 =item B<-sts>,   B<--space-terminal-semicolon>
 
@@ -944,6 +1012,11 @@ multi-line C<qw> quotes to be left unchanged.  This option will not
 normally be necessary, but was added for testing purposes, because in
 some versions of perl, trimming C<qw> quotes changes the syntax tree.
 
+=item Trimming trailing whitespace from lines of POD
+
+B<-trp> or B<--trim-pod> will remove trailing whitespace from lines of POD.
+The default is not to do this.
+
 =back
 
 =head2 Comment Controls
@@ -995,7 +1068,7 @@ right.  The default is n=4 spaces.
 =item B<-fpsc=n>,  B<--fixed-position-side-comment=n>
 
 This parameter tells perltidy to line up side comments in column number B<n>
-whenever possible.  The default, n=0, is not do do this.
+whenever possible.  The default, n=0, will not do this.
 
 =item B<-iscl>,  B<--ignore-side-comment-lengths>
 
@@ -1138,7 +1211,7 @@ can still be achieved with -ncscb:
   perltidy -csc -ncscb
   } ## end foreach my $foo (sort { $b cmp $a ...
 
-However this causes a problem with editors editors which cannot recognize
+However this causes a problem with editors which cannot recognize
 comments or are not configured to do so because they cannot "bounce" around in
 the text correctly.  The B<-cscb> flag has been added to
 help them by appending appropriate balancing structure:
@@ -1328,7 +1401,7 @@ single '#'.
 
 =item B<-osbc>, B<--outdent-static-block-comments>
 
-The command B<-osbc> will will cause static block comments to be outdented by 2
+The command B<-osbc> will cause static block comments to be outdented by 2
 spaces (or whatever B<-ci=n> has been set to), if possible.
 
 =back
@@ -1344,7 +1417,7 @@ when it is a side comment.
 =item B<-ssc>, B<--static-side-comments>
 
 When B<-ssc> is used, a side comment with a static leading pattern, which is
-C<##> by default, will be be spaced only a single space from previous
+C<##> by default, will be spaced only a single space from previous
 character, and it will not be vertically aligned with other side comments.
 
 The default is B<-nssc>.
@@ -1592,7 +1665,7 @@ comma and an opening token.  For example:
         description => $ref->{description}
       };
 
-The flag B<-otr> is actually a synonym for three other flags
+The flag B<-otr> is actually an abbreviation for three other flags
 which can be used to control parens, hash braces, and square brackets
 separately if desired:
 
@@ -1638,7 +1711,7 @@ between tightness and readability in complex lists.
 
 =item *
 
-Different controls may be applied to to different token types,
+Different controls may be applied to different token types,
 and it is also possible to control block braces; see below.
 
 =item *
@@ -1777,8 +1850,9 @@ C<elsif>, and C<else> blocks, we could use
 C<perltidy -bli -bbvt=1 -bbvtl='if elsif else'>.
 
 There is no vertical tightness control for closing block braces; with
-the exception of one-line blocks, they will normally remain on a 
-separate line.
+one exception they will be placed on separate lines.
+The exception is that a cascade of closing block braces may
+be stacked on a single line.  See B<-scbb>.
 
 =item B<-sot>,  B<--stack-opening-tokens> and related flags
 
@@ -1810,8 +1884,13 @@ controls can be used:
   -sop  or --stack-opening-paren
   -sohb or --stack-opening-hash-brace
   -sosb or --stack-opening-square-bracket
+  -sobb or --stack-opening-block-brace
 
-The flag B<-sot> is a synonym for B<-sop -sohb -sosb>.
+The flag B<-sot> is an abbreviation for B<-sop -sohb -sosb>.
+
+The flag B<-sobb> is a abbreviation for B<-bbvt=2 -bbvtl='*'>.  This
+will case a cascade of opening block braces to appear on a single line,
+although this an uncommon occurrence except in test scripts. 
 
 =item B<-sct>,  B<--stack-closing-tokens> and related flags
 
@@ -1857,8 +1936,26 @@ following controls can be used:
   -scp  or --stack-closing-paren
   -schb or --stack-closing-hash-brace
   -scsb or --stack-closing-square-bracket
+  -scbb or --stack-closing-block-brace
 
-The flag B<-sct> is a synonym for B<-scp -schb -scsb>.
+The flag B<-sct> is an abbreviation for stacking the non-block closing
+tokens, B<-scp -schb -scsb>. 
+
+Stacking of closing block braces, B<-scbb>, causes a cascade of isolated
+closing block braces to be combined into a single line as in the following
+example:
+
+    # -scbb:
+    for $w1 (@w1) {
+        for $w2 (@w2) {
+            for $w3 (@w3) {
+                for $w4 (@w4) {
+                    push( @lines, "$w1 $w2 $w3 $w4\n" );
+                } } } }
+
+To simplify input even further for the case in which both opening and closing
+non-block containers are stacked, the flag B<-sac> or B<--stack-all-containers>
+is an abbreviation for B<-sot -sot>.
 
 =item B<-dnl>,  B<--delete-old-newlines>
 
@@ -2005,18 +2102,22 @@ of perltidy.
 
 =item B<-cab=n>,  B<--comma-arrow-breakpoints=n>
 
-A comma which follows a comma arrow, '=>', requires special
+A comma which follows a comma arrow, '=>', is given special
 consideration.  In a long list, it is common to break at all such
 commas.  This parameter can be used to control how perltidy breaks at
 these commas.  (However, it will have no effect if old comma breaks are
 being forced because B<-boc> is used).  The possible values of B<n> are:
 
  n=0 break at all commas after =>  
- n=1 stable: break at all commas after => unless this would break
-     an existing one-line container (default)
- n=2 break at all commas after =>, but try to form the maximum
+ n=1 stable: break at all commas after => if container is open,
+     EXCEPT FOR one-line containers
+ n=2 break at all commas after =>, BUT try to form the maximum
      maximum one-line container lengths
  n=3 do not treat commas after => specially at all 
+ n=4 break everything: like n=0 but ALSO break a short container with
+     a => not followed by a comma when -vt=0 is used
+ n=5 stable: like n=1 but ALSO break at open one-line containers when
+     -vt=0 is used (default)
 
 For example, given the following single line, perltidy by default will
 not add any line breaks because it would break the existing one-line
@@ -2034,8 +2135,8 @@ Using B<-cab=0> will force a break after each comma-arrow item:
 
 If perltidy is subsequently run with this container broken, then by
 default it will break after each '=>' because the container is now
-broken.  To reform a one-line container, the parameter B<-cab=2> would
-be needed.
+broken.  To reform a one-line container, the parameter B<-cab=2> could
+be used.
 
 The flag B<-cab=3> can be used to prevent these commas from being
 treated specially.  In this case, an item such as "01" => 31 is
@@ -2138,7 +2239,7 @@ With B<perltidy -kis> the multiple statements are retained:
 
 The statements are still subject to the specified value
 of B<maximum-line-length> and will be broken if this 
-maximum is exceeed.
+maximum is exceeded.
 
 =back
 
@@ -2169,7 +2270,7 @@ The parameter B<-blbs=n> requests that least B<n> blank lines precede a sub
 definition which does not follow a comment and which is more than one-line
 long.  The default is <-blbs=1>.  B<BEGIN> and B<END> blocks are included.
 
-The requested number of blanks statement will be inserted regardless of of the
+The requested number of blanks statement will be inserted regardless of the
 value of B<--maximum-consecutive-blank-lines=n> (B<-mbl=n>) with the exception
 that if B<-mbl=0> then no blanks will be output.
 
@@ -2297,8 +2398,38 @@ by Damian Conway:
     -wbb="% + - * / x != == >= <= =~ !~ < > | & = 
           **= += *= &= <<= &&= -= /= |= >>= ||= //= .= %= ^= x="
 
-Note that the -st and -se flags make perltidy act as a filter on one file only.  
-These can be overridden with -nst and -nse if necessary.
+Please note that this parameter set includes -st and -se flags, which make
+perltidy act as a filter on one file only.  These can be overridden by placing
+B<-nst> and/or B<-nse> after the -pbp parameter. 
+
+Also note that the value of continuation indentation, -ci=4, is equal to the
+value of the full indentation, -i=4.  In some complex statements perltidy will
+produce nicer results with -ci=2. This can be implemented by including -ci=2
+after the -pbp parameter.  For example, 
+
+    # perltidy -pbp
+    $self->{_text} = (
+         !$section        ? ''
+        : $type eq 'item' ? "the $section entry"
+        :                   "the section on $section"
+        )
+        . (
+        $page
+        ? ( $section ? ' in ' : '' ) . "the $page$page_ext manpage"
+        : ' elsewhere in this document'
+        );
+
+    # perltidy -pbp -ci=2
+    $self->{_text} = (
+         !$section        ? ''
+        : $type eq 'item' ? "the $section entry"
+        :                   "the section on $section"
+      )
+      . (
+        $page
+        ? ( $section ? ' in ' : '' ) . "the $page$page_ext manpage"
+        : ' elsewhere in this document'
+      );
 
 =back
 
@@ -2361,7 +2492,7 @@ have a leading dot.  Further system-dependent information will be found
 in the INSTALL file distributed with perltidy.
 
 Under Windows, perltidy will also search for a configuration file named perltidy.ini since Windows does not allow files with a leading period (.).
-Use C<perltidy -dpro> to see the possbile locations for your system.
+Use C<perltidy -dpro> to see the possible locations for your system.
 An example might be F<C:\Documents and Settings\All Users\perltidy.ini>.
 
 Another option is the use of the PERLTIDY environment variable.
@@ -2377,7 +2508,7 @@ configuration file common to all users on the machine.  Be sure to enter the
 full path of the configuration file in the value of the environment variable.
 Ex.  PERLTIDY=C:\Documents and Settings\perltidy.ini
 
-The configuation file is free format, and simply a list of parameters, just as
+The configuration file is free format, and simply a list of parameters, just as
 they would be entered on a command line.  Any number of lines may be used, with
 any number of parameters per line, although it may be easiest to read with one
 parameter per line.  Comment text begins with a #, and there must
@@ -2451,8 +2582,8 @@ are preceded by the name of the alias (without leading dashes), like this:
 	}
 
 where B<newword> is the abbreviation, and B<opt1>, etc, are existing parameters
-I<or other abbreviations>.  The main syntax requirement is that
-the new abbreviation must begin on a new line.
+I<or other abbreviations>.  The main syntax requirement is that the new
+abbreviation along with its opening curly brace must begin on a new line.
 Space before and after the curly braces is optional.
 For a
 specific example, the following line
@@ -2565,6 +2696,11 @@ around tokens.
 B<--dump-want-right-space> or B<-dwrs>  will write the hash %want_right_space
 to standard output and quit.  See the section on controlling whitespace
 around tokens.
+
+B<--no-memoize> or B<-nmem>  will turn of memoizing.
+Memoization can reduce run time when running perltidy repeatedly in a 
+single process.  It is on by default but can be deactivated for
+testing with B<-nmem>.
 
 B<-DEBUG>  will write a file with extension F<.DEBUG> for each input file 
 showing the tokenization of all lines of code.
@@ -2848,7 +2984,7 @@ Several parameters which refer to code block types may be customized by also
 specifying an associated list of block types.  The type of a block is the name
 of the keyword which introduces that block, such as B<if>, B<else>, or B<sub>.
 An exception is a labeled block, which has no keyword, and should be specified
-with just a colon.
+with just a colon.  To specify all blocks use B<'*'>.
 
 For example, the following parameter specifies C<sub>, labels, C<BEGIN>, and
 C<END> blocks:
@@ -2857,7 +2993,10 @@ C<END> blocks:
 
 (the meaning of the -cscl parameter is described above.)  Note that
 quotes are required around the list of block types because of the
-spaces.
+spaces.  For another example, the following list specifies all block types
+for vertical tightness:
+
+   -bbvtl='*'
 
 =head2 Specifying File Extensions
 
@@ -2883,7 +3022,7 @@ The following list shows all short parameter names which allow a prefix
  D    anl asc  aws  b    bbb bbc bbs  bl   bli  boc bok  bol  bot  ce
  csc  dac dbc  dcsc ddf  dln dnl dop  dp   dpro dsc dsm  dsn  dtt  dwls
  dwrs dws f    fll  frm  fs  hsc html ibc  icb  icp iob  isbc lal  log
- lp   lsl ohbr okw  ola  oll opr opt  osbr otr  ple ple  pod  pvl  q
+ lp   lsl ohbr okw  ola  oll opr opt  osbr otr  ple  pod  pvl  q
  sbc  sbl schb scp  scsb sct se  sfp  sfs  skp  sob sohb sop  sosb sot
  ssc  st  sts  syn  t    tac tbc toc  tp   tqw  tsc w    x    bar  kis
 
@@ -2959,7 +3098,7 @@ perlstyle(1), Perl::Tidy(3)
 
 =head1 VERSION
 
-This man page documents perltidy version 20120801.
+This man page documents perltidy version 20140711.
 
 =head1 CREDITS
 
@@ -2984,7 +3123,7 @@ see the CHANGES file.
 
 =head1 COPYRIGHT
 
-Copyright (c) 2000-2010 by Steve Hancock
+Copyright (c) 2000-2012 by Steve Hancock
 
 =head1 LICENSE
 
