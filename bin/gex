@@ -560,24 +560,15 @@ sub get_resolved_project {
   my $db = shift or die;
   my $pn = shift or die;
 
-  my $proj = get_project($db, $pn);
-  return $proj unless $proj;
+  my $p = get_project($db, $pn);
+  return $p unless $p;
 
-  my $d = {%{$db->{default}}};
-  if (my $dr = $d->{remote}) {
-    my $r = {%{$db->{remote}{$dr}}};
-    delete $r->{name};
-    $d = {%$d, %$r};
-  }
+  my $d = $db->{default};
 
-  my $p = {%$proj};
-  if (my $pr = $p->{remote}) {
-    my $r = {%{$db->{remote}{$pr}}};
-    delete $r->{name};
-    $p = {%$p, %$r};
-  }
+  my $rn = $p->{remote} || $d->{remote};
+  my $r = $db->{remote}{$rn};
 
-  return {%$d, %$p};
+  return {%$d, %$r, %$p};
 }
 
 sub resolve_query {
