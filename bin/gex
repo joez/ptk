@@ -46,7 +46,7 @@ SYNOPSIS
     $script report-manifest [<options>] [<src>...]
 
     $script forall [<options>] [<src>...]
-    $script tag [<options>] <tag> [<src>...]
+    $script tag-manifest [<options>] <tag> [<src>...]
     $script format-patch [<options>] [<src>...]
     $script match-cherry [<options>] <this> <that> [<src>...]
 
@@ -98,12 +98,13 @@ COMMAND
       <command>:  command to run, default is "git status"
       <src>:      relative Git repo paths
 
-    $script tag [-r <root>] [-b <base>] <tag> [<src>...]
-      add a tag for each repo given the revision from baseline manifest,
-      if the baseline is not provided HEAD is used instead
-      <base>: snapshot manifest as the baseline
-      <tag>:  tag name to apply
-      <src>:  relative Git repo paths
+    $script tag-manifest [-r <root>] [-u <url>] [-m <manifest>]
+    <tag> [<src>...]
+      add a tag for each repo given the revision from the manifest
+      <url>:      manifest repo url, default ".repo/manifests"
+      <manifest>: alternative manifest, default "default.xml"
+      <tag>:      tag name to apply
+      <src>:      relative Git repo paths
 
     $script format-patch [-r <root>] [-q <query>] [-o <outdir>] [<src>...]
       format-patch for each repo into output directory
@@ -204,9 +205,9 @@ EXAMPLES
       overlay repo's revision defined in default.xml with one defined in
       snapshot.xml, only the repo name in "repo-list.txt" is applied
 
-    13. $script tag -b snapshot.xml TAG_FOR_TEST repo-list.txt
+    13. $script tag-manifest -u . -m pin.xml TAG_FOR_TEST repo-list.txt
       add a tag named TAG_FOR_TEST for each repo listed in repo-list.txt
-      based on the revision defined from snapshot.xml
+      based on the revision defined from pin.xml
 
 NOTES
     * all the Git repo paths are assumed relative to the root,
@@ -255,7 +256,7 @@ my %cmdcbs = (
   "dump-repo"        => \&do_dump_repo,
   "match-cherry"     => \&do_match_cherry,
   "forall"           => \&do_forall,
-  "tag"              => \&do_tag,
+  "tag-manifest"     => \&do_tag_manifest,
   "format-patch"     => \&do_format_patch,
   "overlay-manifest" => \&do_overlay_manifest,
 );
@@ -658,8 +659,7 @@ sub do_forall {
     $log->warn("can't access manifest: $manifest");
   }
 
-  my @fail = ();
-
+  my %done;
   my ($ttl, $cnt) = (scalar(@repos), 1);
   for my $repo (@repos) {
     $log->info("[$cnt / $ttl] processing: $repo");
@@ -687,14 +687,15 @@ sub do_forall {
       my $chdir = Ptk::Base::Chdir->new;
       unless ($chdir->pushd($path)) {
         $log->warn("fail to access $path, skip: $repo");
-        push @fail, $repo;
       }
       else {
         local %ENV = (%ENV, %$env);
 
         if (system($cmd)) {
           $log->warn("fail to process: $repo");
-          push @fail, $repo;
+        }
+        else {
+          $done{$repo}++;
         }
       }
     };
@@ -705,68 +706,18 @@ sub do_forall {
 Total $ttl projects processed
 EOF
 
+  my @fail = grep { !exists $done{$_} } @repos;
   print 'Total ', scalar @fail, ' projects are failed:', "\n";
   print join("\n", @fail), "\n";
 }
 
-sub do_tag {
+sub do_tag_manifest {
   my $name = shift or usage();
-  my @repos = resolve_list(@_);
 
-  my $db;
-  my $baseline = $opt{base};
-  if (-e $baseline) {
-    $db = parse_manifest($baseline);
-  }
+  # hack here
+  $opt{command} = "git tag $name \$REPO_LREV";
 
-  my @fail = ();
-
-  my ($ttl, $cnt) = (scalar(@repos), 1);
-  for my $repo (@repos) {
-    $log->info("[$cnt / $ttl] processing: $repo");
-    $cnt++;
-
-    print "#-- project: $repo\n";
-
-    my $path = resolve_path($repo);
-    my $git_dir = $path =~ /\.git$/ ? '.' : '.git';
-
-    my $rev = 'HEAD';
-    if ($db) {
-      if (my $d = get_resolved_project($db, $repo)) {
-        $rev = get_local_rev($d->{revision});
-      }
-      else {
-        $log->warn("can't find repo in baseline: $repo");
-        push @fail, $repo;
-        next;
-      }
-    }
-
-    my $chdir = Ptk::Base::Chdir->new;
-    unless ($chdir->pushd($path)) {
-      $log->warn("fail to access $path, skip $repo");
-      push @fail, $repo;
-    }
-    else {
-      local %ENV = (%ENV, GIT_DIR => $git_dir);
-      my $cmd = "git tag $name $rev";
-      $log->info($cmd);
-
-      if (system($cmd)) {
-        $log->warn("fail to process: $repo");
-        push @fail, $repo;
-      }
-    }
-  }
-
-  print <<EOF;
-#-- DONE
-Total $ttl projects processed
-EOF
-
-  print 'Total ', scalar @fail, ' projects are failed:', "\n";
-  print join("\n", @fail), "\n";
+  do_forall(@_);
 }
 
 sub do_format_patch {
