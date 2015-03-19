@@ -487,7 +487,7 @@ sub repo_to_xls {
     @width = (10, 10, 40, 10, 30, 30, 20, 20);
 
     my %defs = (
-      map({$_, []} @head),
+      map({ $_, [] } @head),
       Status     => [sort qw/Todo Doing Done Redo Hold Never/],
       Priorities => [sort qw/Low Normal High/],
     );
@@ -1312,7 +1312,6 @@ sub db_to_xls {
   my %author_email;
   my %id_ticket;
   my %id_reviewer;
-  my %id_file;
   my $name_match = 'MatchedCherries';
 
   my $workbook = Excel::Writer::XLSX->new($dst);
@@ -1370,10 +1369,6 @@ sub db_to_xls {
           my $l = join ',', $id, $_;
           $id_reviewer{$l}++;
         }
-        for (sort keys %{$d{name_status}}) {
-          my $l = join ',', $id, $repo, $_, $d{name_status}->{$_};
-          $id_file{$l}++;
-        }
 
         $d{committer_time} = format_date($d{committer_time});
         my @l = @d{@fields{@info}};
@@ -1412,12 +1407,25 @@ sub db_to_xls {
 
   # "file" worksheet
   if ($NEED->($sheet = "file")) {
-    @head = qw/ID Repo File Status/;    # hardcoded, do not change
+    @head = qw/ID Repo File Status/;
     @width = (42, 46, 64, 8);
 
+    my %fields;
+    @fields{@head} = qw/commit repo file status/;
+
     $NEW_SHEET->();
-    for my $l (sort keys %id_file) {
-      $worksheet->write_row($row++, 0, [split ',', $l]);
+    foreach my $repo (sort keys %{$db->{data}}) {
+      foreach my $id (@{$db->{data}{$repo}{id}}) {
+        my %d = %{$db->{data}{$repo}{data}{$id}};
+
+        for (sort keys %{$d{name_status}}) {
+          $d{file}   = $_;
+          $d{status} = $d{name_status}->{$_};
+
+          my @l = @d{@fields{@head}};
+          eval { $worksheet->write_row($row++, 0, \@l) };
+        }
+      }
     }
     $NEW_TABLE->();
   }
@@ -1487,7 +1495,7 @@ sub db_to_xls {
     @width = (10, 10, 10, 46, 30, 18, 40, 14);
 
     my %defs = (
-      map({$_, []} @head),
+      map({ $_, [] } @head),
       Types      => [sort qw/Defect Feature Enhance Spec Custom Other/],
       Status     => [sort qw/Todo Doing Done Redo Hold Never/],
       Priorities => [sort qw/Low Normal High/],
