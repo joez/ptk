@@ -637,10 +637,11 @@ sub do_dump_repo {
 
 sub get_local_rev {
   my $rev = shift or die;
+  my $remote = shift || '';
 
   for ($rev) {
     unless (/^HEAD$/ or m|^refs/| or /^[0-9a-f]{40}$/) {
-      $rev = 'origin/' . $rev;
+      $rev = join('/', length $remote ? $remote : 'origin', $rev);
     }
   }
   return $rev;
@@ -675,7 +676,8 @@ sub do_forall {
         $env->{REPO_PROJECT} = $d->{name};
         $env->{REPO_REMOTE}  = $d->{remote};
         $env->{REPO_RREV}    = $d->{revision};
-        $env->{REPO_LREV}    = get_local_rev($d->{revision});
+        $env->{REPO_LREV}
+          = get_local_rev($d->{revision}, $d->{remote} || $d->{alias});
       }
       else {
         $log->warn("can't find repo in manifest: $repo");
