@@ -1,5 +1,5 @@
 package System::Command;
-
+$System::Command::VERSION = '1.111';
 use warnings;
 use strict;
 use 5.006;
@@ -7,17 +7,30 @@ use 5.006;
 use Carp;
 use Cwd qw( cwd );
 use IO::Handle;
-use IPC::Open3 qw( open3 );
 use Symbol ();
+use Scalar::Util qw( blessed );
 use List::Util qw( reduce );
+use System::Command::Reaper;
 
 use Config;
-use POSIX ":sys_wait_h";
-use constant STATUS  => qw( exit signal core );
+use Fcntl qw( F_GETFD F_SETFD FD_CLOEXEC );
 
-our $VERSION = '1.09';
+# MSWin32 support
+use constant MSWin32 => $^O eq 'MSWin32';
+require IPC::Run if MSWin32;
 
 our $QUIET = 0;
+
+# trace setup at startup
+my $_trace_opts = sub {
+    my ( $trace, $file, $th ) = split /=/, shift, 2;
+    open $th, '>>', $file or carp "Can't open $file: $!" if $file;
+    $th ||= *STDERR;
+    return ( $trace, $th );
+};
+my @trace;
+@trace = $_trace_opts->( $ENV{SYSTEM_COMMAND_TRACE} )
+    if $ENV{SYSTEM_COMMAND_TRACE};
 
 sub import {
     my ( $class, @args ) = @_;
@@ -40,20 +53,138 @@ for my $attr (qw( cmdline )) {
     *$attr = sub { return @{ $_[0]{$attr} } };
 }
 
-# a private sub-process spawning function
-my $_seq   = 0;
+# REALLY PRIVATE FUNCTIONS
+# a sub-process spawning function
 my $_spawn = sub {
-    my (@cmd) = @_;
+    my ($o, @cmd) = @_;
     my $pid;
+
     # setup filehandles
     my $in  = Symbol::gensym;
     my $out = Symbol::gensym;
     my $err = Symbol::gensym;
 
+    # no buffering on pipes used for writing
+    select( ( select($in), $| = 1 )[0] );
+
     # start the command
-    $pid = open3( $in, $out, $err, @cmd );
+    if (MSWin32) {
+        $pid = IPC::Run::start(
+            [@cmd],
+            '<pipe'  => $in,
+            '>pipe'  => $out,
+            '2>pipe' => $err,
+        );
+    }
+    else {
+
+        # the code below takes inspiration from IPC::Open3 and Sys::Cmd
+
+        # create handles for the child process (using CAPITALS)
+        my $IN  = Symbol::gensym;
+        my $OUT = Symbol::gensym;
+        my $ERR = Symbol::gensym;
+
+        # no buffering on pipes used for writing
+        select( ( select($OUT), $| = 1 )[0] );
+        select( ( select($ERR), $| = 1 )[0] );
+
+        # connect parent and child with pipes
+        pipe $IN,  $in  or croak "input pipe(): $!";
+        pipe $out, $OUT or croak "output pipe(): $!";
+        pipe $err, $ERR or croak "errput pipe(): $!";
+
+        # an extra pipe to communicate exec() failure
+        pipe my $stat_r, my $stat_w;
+
+        # create the child process
+        $pid = fork;
+        croak "Can't fork: $!" if !defined $pid;
+
+        if ($pid) {
+
+            # parent won't use those handles
+            close $stat_w;
+            close $IN;
+            close $OUT;
+            close $ERR;
+
+            # failed to fork+exec?
+            my $mesg = do { local $/; <$stat_r> };
+            die $mesg if $mesg;
+        }
+        else {    # kid
+
+            # use $stat_r to communicate errors back to the parent
+            eval {
+
+                # child won't use those handles
+                close $stat_r;
+                close $in;
+                close $out;
+                close $err;
+
+                # setup process group if possible
+                setpgrp 0, 0 if $o->{setpgrp} && $Config{d_setpgrp};
+
+                # close $stat_w on exec
+                my $flags = fcntl( $stat_w, F_GETFD, 0 )
+                    or croak "fcntl GETFD failed: $!";
+                fcntl( $stat_w, F_SETFD, $flags | FD_CLOEXEC )
+                    or croak "fcntl SETFD failed: $!";
+
+                # associate STDIN, STDOUT and STDERR to the pipes
+                my ( $fd_IN, $fd_OUT, $fd_ERR )
+                    = ( fileno $IN, fileno $OUT, fileno $ERR );
+                open \*STDIN, "<&=$fd_IN"
+                    or croak "Can't open( \\*STDIN, '<&=$fd_IN' ): $!";
+                open \*STDOUT, ">&=$fd_OUT"
+                    or croak "Can't open( \\*STDOUT, '<&=$fd_OUT' ): $!";
+                open \*STDERR, ">&=$fd_ERR"
+                    or croak "Can't open( \\*STDERR, '<&=$fd_ERR' ): $!";
+
+                # and finally, exec into @cmd
+                exec( { $cmd[0] } @cmd )
+                    or do { croak "Can't exec( @cmd ): $!"; }
+            };
+
+            # something went wrong
+            print $stat_w $@;
+            close $stat_w;
+
+            # DIE DIE DIE
+            eval { require POSIX; POSIX::_exit(255); };
+            exit 255;
+        }
+    }
 
     return ( $pid, $in, $out, $err );
+};
+
+my $_dump_ref = sub {
+    require Data::Dumper;    # only load if needed
+    local $Data::Dumper::Indent    = 0;
+    local $Data::Dumper::Purity    = 0;
+    local $Data::Dumper::Maxdepth  = 0;
+    local $Data::Dumper::Quotekeys = 0;
+    local $Data::Dumper::Sortkeys  = 1;
+    local $Data::Dumper::Useqq     = 1;
+    local $Data::Dumper::Terse     = 1;
+    return Data::Dumper->Dump( [shift] );
+};
+
+my $_do_trace = sub {
+    my ( $trace, $th, $pid, $cmd, $o ) = @_;
+    print $th "System::Command cmd[$pid]: ",
+        join( ' ', map /\s/ ? $_dump_ref->($_) : $_, @$cmd ), "\n";
+    print $th map "System::Command opt[$pid]: $_->[0] => $_->[1]\n",
+        map [ $_ => $_dump_ref->( $o->{$_} ) ],
+        grep { $_ ne 'env' } sort keys %$o
+        if $trace > 1;
+    print $th map "System::Command env[$pid]: $_->[0] => $_->[1]\n",
+        map [ $_ => $_dump_ref->( $o->{env}{$_} ) ],
+        keys %{ $o->{env} || {} }
+        if $trace > 2;
 };
 
 # module methods
@@ -61,7 +192,7 @@ sub new {
     my ( $class, @cmd ) = @_;
 
     # split the args
-    my @o;
+    my @o = { setpgrp => 1 };
     @cmd = grep { !( ref eq 'HASH' ? push @o, $_ : 0 ) } @cmd;
 
     # merge the option hashes
@@ -73,6 +204,11 @@ sub new {
         };
     }
     @o;
+
+    # open the trace file before changing directory
+    my ( $trace, $th );
+    ( $trace, $th ) = $_trace_opts->( $o->{trace} ) if $o->{trace};
+    ( $trace, $th ) = @trace if @trace;    # environment override
 
     # chdir to the expected directory
     my $orig = cwd;
@@ -86,16 +222,24 @@ sub new {
 
     # update the environment
     if ( exists $o->{env} ) {
+        croak "ENV variables cannot be empty strings on Win32"
+            if MSWin32 and grep { defined and !length } values %{ $o->{env} };
         @ENV{ keys %{ $o->{env} } } = values %{ $o->{env} };
         delete $ENV{$_}
             for grep { !defined $o->{env}{$_} } keys %{ $o->{env} };
     }
 
     # start the command
-    my ( $pid, $in, $out, $err ) = eval { $_spawn->(@cmd); };
+    my ( $pid, $in, $out, $err ) = eval { $_spawn->( $o, @cmd ); };
 
     # FIXME - better check error conditions
-    croak $@ if !defined $pid;
+    if ( !defined $pid ) {
+        $_do_trace->( $trace, $th, '!', \@cmd, $o ) if $trace;
+        croak $@;
+    }
+
+    # trace is mostly a debugging tool
+    $_do_trace->( $trace, $th, $pid, \@cmd, $o ) if $trace;
 
     # some input was provided
     if ( defined $o->{input} ) {
@@ -113,13 +257,18 @@ sub new {
 
     # create the object
     my $self = bless {
-        cmdline => [ @cmd ],
-        options => $o,
-        pid     => $pid,
-        stdin   => $in,
-        stdout  => $out,
-        stderr  => $err,
+        cmdline  => [@cmd],
+        options  => $o,
+        pid      => MSWin32 ? $pid->{KIDS}[0]{PID} : $pid,
+        stdin    => $in,
+        stdout   => $out,
+        stderr   => $err,
+      ( _ipc_run => $pid )x!! MSWin32,
     }, $class;
+
+    # create the subprocess reaper and link the handles and command to it
+    ${*$in} = ${*$out} = ${*$err} = $self->{reaper}    # typeglobs FTW
+        = System::Command::Reaper->new($self);
 
     return $self;
 }
@@ -129,60 +278,23 @@ sub spawn {
     return @{ $class->new(@cmd) }{qw( pid stdin stdout stderr )};
 }
 
-sub is_terminated {
-    my ($self) = @_;
-    my $pid = $self->{pid};
-
-    # Zed's dead, baby. Zed's dead.
-    return $pid if !kill 0, $pid and exists $self->{exit};
-
-    # If that is a re-animated body, we're gonna have to kill it.
-    return $self->_reap(WNOHANG);
-}
-
-sub _reap {
-    my ( $self, @flags ) = @_;
-    my $pid = $self->{pid};
-
-    if ( my $reaped = waitpid( $pid, @flags ) and !exists $self->{exit} ) {
-        my $zed = $reaped == $pid;
-        carp "Child process already reaped, check for a SIGCHLD handler"
-            if !$zed && !$QUIET;
-
-        @{$self}{ STATUS() }
-            = $zed
-            ? ( $? >> 8, $? & 127, $? & 128 )
-            : ( -1, -1, -1 );
-
-        return $reaped;    # It's dead, Jim!
-    }
-
-    # Look! It's moving. It's alive. It's alive...
-    return;
-}
-
-sub close {
-    my ($self) = @_;
-
-    # close all pipes
-    my ( $in, $out, $err ) = @{$self}{qw( stdin stdout stderr )};
-    $in  and $in->opened  and $in->close  || carp "error closing stdin: $!";
-    $out and $out->opened and $out->close || carp "error closing stdout: $!";
-    $err and $err->opened and $err->close || carp "error closing stderr: $!";
-
-    # and wait for the child (if any)
-    $self->_reap();
-
-    return $self;
-}
+# delegate those to the reaper
+sub is_terminated { $_[0]{reaper}->is_terminated() }
+sub close         { $_[0]{reaper}->close() }
 
 1;
 
-__END__
+
+
+=pod
 
 =head1 NAME
 
 System::Command - Object for running system commands
+
+=head1 VERSION
+
+version 1.111
 
 =head1 SYNOPSIS
 
@@ -195,15 +307,15 @@ System::Command - Object for running system commands
     $cmd = System::Command->new( @cmd, \%option );
 
     # $cmd is basically a hash, with keys / accessors
-    $cmd->stdin();     # filehandle to the process' stdin (write)
-    $cmd->stdout();    # filehandle to the process' stdout (read)
-    $cmd->stderr();    # filehandle to the process' stdout (read)
+    $cmd->stdin();     # filehandle to the process stdin (write)
+    $cmd->stdout();    # filehandle to the process stdout (read)
+    $cmd->stderr();    # filehandle to the process stdout (read)
     $cmd->pid();       # pid of the child process
 
     # find out if the child process died
     if ( $cmd->is_terminated() ) {
         # the handles are not closed yet
-        # but $cmd->exit() et al. are available
+        # but $cmd->exit() et al. are available if it's dead
     }
 
     # done!
@@ -219,15 +331,17 @@ System::Command - Object for running system commands
 
 =head1 DESCRIPTION
 
-C<System::Command> is a class that launches external system commands
+System::Command is a class that launches external system commands
 and return an object representing them, allowing to interact with them
 through their C<STDIN>, C<STDOUT> and C<STDERR> handles.
 
 =head1 METHODS
 
-C<System::Command> supports the following methods:
+System::Command supports the following methods:
 
-=head2 new( @cmd )
+=head2 new
+
+    my $cmd = System::Command->new( @cmd )
 
 Runs an external command using the list in C<@cmd>.
 
@@ -252,6 +366,9 @@ The I<current working directory> in which the command will be run.
 
 A hashref containing key / values to add to the command environment.
 
+If several option hashes define the C<env> key, the hashes they point
+to will be merged into one (instead of the last one taking precedence).
+
 If a value is C<undef>, the variable corresponding to the key will
 be I<removed> from the environment.
 
@@ -269,36 +386,89 @@ On some systems, some commands may close standard input on startup,
 which will cause a SIGPIPE when trying to write to it. This will raise
 an exception.
 
+=item C<setpgrp>
+
+By default, the spawned process is made the leader of its own process
+group using C<setpgrp( 0, 0 )> (if possible). This enables sending a
+signal to the command and all its child processes at once:
+
+    # negative signal is sent to the process group
+    kill -SIGKILL, $cmd->pid;
+
+Setting the C<setpgrp> option to a false value disables this behaviour.
+
+=item C<trace>
+
+The C<trace> option defines the trace settings for System::Command.
+The C<SYSTEM_COMMAND_TRACE> environment variable can be used to specify
+a global trace setting at startup. The environment variable overrides
+individual C<trace> options.
+
+If C<trace> or C<SYSTEM_COMMAND_TRACE> contains an C<=> character then
+what follows it is used as the name of the file to append the trace to.
+When using the C<trace> option, it is recommended to use an absolute
+path for the trace file, in case the main program C<chdir()> before
+calling System::Command.
+
+At trace level 1, only the command line is shown:
+
+    System::Command cmd[12834]: /usr/bin/git commit -m "Test option hash in new()"
+
+Note: Command-line parameters containing whitespace will be properly quoted.
+
+At trace level 2, the options values are shown:
+
+    System::Command opt[12834]: cwd => "/tmp/kHkPUBIVWd"
+    System::Command opt[12834]: fatal => {128 => 1,129 => 1}
+    System::Command opt[12834]: git => "/usr/bin/git"
+
+Note: The C<fatal> and C<git> options in the example above are actually
+used by L<Git::Repository> to determine the command to be run, and
+ignored by System::Command. References are dumped using L<Data::Dumper>.
+
+At trace level 3, the content of the C<env> option is also listed:
+
+    System::Command env[12834]: GIT_AUTHOR_EMAIL => "author\@example.com"
+    System::Command env[12834]: GIT_AUTHOR_NAME => "Example author"
+
+If the command cannot be spawned, the trace will show C<!> instead of
+the pid:
+
+    System::Command cmd[!]: does-not-exist
+
 =back
 
-The C<System::Command> object returned by C<new()> has a number of
+The System::Command object returned by C<new()> has a number of
 attributes defined (see below).
 
+=head2 close
 
-=head2 close()
+    $cmd->close;
 
 Close all pipes to the child process, collects exit status, etc.
 and defines a number of attributes (see below).
 
-=head2 is_terminated()
+=head2 is_terminated
+
+    if ( $cmd->is_terminated ) {...}
 
 Returns a true value if the underlying process was terminated.
 
 If the process was indeed terminated, collects exit status, etc.
 and defines the same attributes as C<close()>, but does B<not> close
-all pipes to the child process,
+all pipes to the child process.
 
+=head2 spawn
 
-=head2 spawn( @cmd )
+    my ( $pid, $in, $out, $err ) = System::Command->spawn(@cmd);
 
 This shortcut method calls C<new()> (and so accepts options in the same
 manner) and directly returns the C<pid>, C<stdin>, C<stdout> and C<stderr>
 attributes, in that order.
 
-
 =head2 Accessors
 
-The attributes of a C<System::Command> object are also accessible
+The attributes of a System::Command object are also accessible
 through a number of accessors.
 
 The object returned by C<new()> will have the following attributes defined:
@@ -336,9 +506,9 @@ Regarding the handles to the child process, note that in the following code:
     my $fh = System::Command->new( @cmd )->stdout;
 
 C<$fh> is opened and points to the output handle of the child process,
-while the anonymous C<System::Command> object has been destroyed. Once
+while the anonymous System::Command object has been destroyed. Once
 C<$fh> is destroyed, the subprocess will be reaped, thus avoiding zombies.
-
+(L<System::Command::Reaper> undertakes this process.)
 
 After the call to C<close()> or after C<is_terminated()> returns true,
 the following attributes will be defined:
@@ -361,19 +531,19 @@ The signal, if any, that killed the command.
 
 =head1 CAVEAT EMPTOR
 
-Note that C<System::Command> uses C<waitpid()> to catch the status
+Note that System::Command uses C<waitpid()> to catch the status
 information of the child processes it starts. This means that if your
 code (or any module you C<use>) does something like the following:
 
     local $SIG{CHLD} = 'IGNORE';    # reap child processes
 
-C<System::Command> will not be able to capture the C<exit>, C<core>
+System::Command will not be able to capture the C<exit>, C<core>
 and C<signal> attributes. It will instead set all of them to the
 impossible value C<-1>, and display the warning
 C<Child process already reaped, check for a SIGCHLD handler>.
 
 To silence this warning (and accept the impossible status information),
-load C<System::Command> with:
+load System::Command with:
 
     use System::Command -quiet;
 
@@ -381,7 +551,7 @@ It is also possible to more finely control the warning by setting
 the C<$System::Command::QUIET> variable (the warning is not emitted
 if the variable is set to a true value).
 
-If the subprocess started by C<System::Command> has a short life
+If the subprocess started by System::Command has a short life
 expectancy, and no other child process is expected to die during that
 time, you could even disable the handler locally (use at your own risks):
 
@@ -397,12 +567,19 @@ Philippe Bruhat (BooK), C<< <book at cpan.org> >>
 
 =head1 ACKNOWLEDGEMENTS
 
-Thanks to Alexis Sukrieh who, when he saw the description of
-C<Git::Repository::Command> during my talk at OSDC.fr 2010, asked
+Thanks to Alexis Sukrieh (SUKRIA) who, when he saw the description of
+L<Git::Repository::Command> during my talk at OSDC.fr 2010, asked
 why it was not an independent module. This module was started by
-taking out of C<Git::Repository::Command> 1.08 the parts that
+taking out of L<Git::Repository::Command> 1.08 the parts that
 weren't related to Git.
 
+Thanks to Christian Walde (MITHALDU) for his help in making this
+module work better under Win32.
+
+The L<System::Command::Reaper> class was added after the addition
+of Git::Repository::Command::Reaper in L<Git::Repository::Command> 1.11.
+It was later removed from L<System::Command> version 1.03, and brought
+back from the dead to deal with the zombie apocalypse in version 1.106.
 
 =head1 BUGS
 
@@ -415,7 +592,6 @@ automatically be notified of progress on your bug as I make changes.
 You can find documentation for this module with the perldoc command.
 
     perldoc System::Command
-
 
 You can also look for information at:
 
@@ -439,10 +615,9 @@ L<http://search.cpan.org/dist/System-Command/>
 
 =back
 
-
 =head1 COPYRIGHT
 
-Copyright 2010-2011 Philippe Bruhat (BooK).
+Copyright 2010-2013 Philippe Bruhat (BooK).
 
 =head1 LICENSE
 
@@ -450,8 +625,13 @@ This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published
 by the Free Software Foundation; or the Artistic License.
 
-See http://dev.perl.org/licenses/ for more information.
-
+See L<http://dev.perl.org/licenses/> for more information.
 
 =cut
+
+
+__END__
+
+# ABSTRACT: Object for running system commands
+
 
