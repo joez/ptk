@@ -88,11 +88,13 @@ COMMAND
     [-c <command>] [<src>...]
       run the same shell command in each repo, with cwd as current
       repo's work tree, environment variables are set:
-       * REPO_PROJECT: the name of the project
-       * REPO_PATH:    the path of the project
-       * REPO_REMOTE:  the name of the remote
-       * REPO_LREV:    the revision translated for local usage
-       * REPO_RREV:    the revision from the manifest
+       * REPO_PROJECT:  the name of the project
+       * REPO_PATH:     the path of the project
+       * REPO_REMOTE:   the name of the remote
+       * REPO_LREV:     the revision translated for local usage
+       * REPO_RREV:     the revision from the manifest
+       * REPO_GROUPS:   the groups from the manifest if exists
+       * REPO_UPSTREAM: the upstream from the manifest if exists
       <url>:      manifest repo url, default ".repo/manifests"
       <manifest>: alternative manifest, default "default.xml"
       <command>:  command to run, default is "git status"
@@ -686,6 +688,8 @@ sub do_forall {
         $env->{REPO_RREV}    = $d->{revision};
         $env->{REPO_LREV}
           = get_local_rev($d->{revision}, $d->{remote} || $d->{alias});
+        $env->{REPO_GROUPS}   = $d->{groups}   if exists $d->{groups};
+        $env->{REPO_UPSTREAM} = $d->{upstream} if exists $d->{upstream};
       }
       else {
         $log->warn("can't find repo in manifest: $repo");
