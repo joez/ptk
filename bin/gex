@@ -1078,7 +1078,7 @@ sub get_patch_id {
   while (<$fd>) {
     print $fi $_;
   }
-  close $fi;
+  close $fd;
 
   my $patch_id = (split ' ', <$fo>)[0];
   $cmd->close;
