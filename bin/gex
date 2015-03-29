@@ -106,10 +106,16 @@ COMMAND
       <tag>:      tag name to apply
       <src>:      relative Git repo paths
 
-    $script format-patch [-r <root>] [-q <query>] [-o <outdir>] [<src>...]
+    $script format-patch [-r <root>] [-q <query>] [-o <output>] [<src>...]
       format-patch for each repo into output directory
-      <query>:   the parameters for "git format-patch", default is "-1"
-      <out-dir>: the output directory, default is "patch"
+      <query>:   the parameters for "git format-patch", default is "-1",
+                 if it is a file, will be regarded as a commit list, with
+                 the format:
+                  * text start with "#" regarded as comment
+                  * text end with ":" regarded as repo path for the
+                    following commits
+                  * one commit id for each line with ordered
+      <output>:  the output directory, default is "./patch"
       <src>:     relative Git repo paths
 
     $script match-cherry [-r <root>] <this> <that> [<src>...]
@@ -199,13 +205,17 @@ EXAMPLES
 
     11. $script format-patch -q BASE..HEAD repo-list.txt
       format-patch from BASE to HEAD for each repo in repo-list.txt,
-      save the patches into "../patch" directory
+      save the patches into "./patch" folder
 
-    12. $script overlay-manifest default.xml snapshot.xml repo-list.txt
+    12. $script format-patch -q commit-list.txt -o exported-patch
+      export the patch according to the definition in the commit-list.txt
+      save the patches into "exported-patch" folder
+
+    13. $script overlay-manifest default.xml snapshot.xml repo-list.txt
       overlay repo's revision defined in default.xml with one defined in
       snapshot.xml, only the repo name in "repo-list.txt" is applied
 
-    13. $script tag-manifest -u . -m pin.xml TAG_FOR_TEST repo-list.txt
+    14. $script tag-manifest -u . -m pin.xml TAG_FOR_TEST repo-list.txt
       add a tag named TAG_FOR_TEST for each repo listed in repo-list.txt
       based on the revision defined from pin.xml
 
@@ -228,7 +238,7 @@ my %opt = (
   base     => '',
   url      => '.repo/manifests',
   manifest => 'default.xml',
-  outdir   => '',
+  output   => '',
   command  => ''
 );
 
@@ -242,7 +252,7 @@ GetOptions(
   "url|u=s"      => \$opt{url},
   "manifest|m=s" => \$opt{manifest},
   "command|c=s"  => \$opt{command},
-  "outdir|o=s"   => \$opt{outdir},
+  "output|o=s"   => \$opt{output},
 ) or usage();
 
 my $cmd = lc(shift || '');
@@ -722,19 +732,64 @@ sub do_tag_manifest {
   do_forall(@_);
 }
 
+sub parse_commit_list {
+  my %db;
+
+  my $re_id  = qr/^([\da-f]{6,40})\b/;
+  my $re_dir = qr/^\[?(.+?)\]?:$/;
+
+  my $dir = '.';
+  foreach my $p (@_) {
+    if (-e $p && -f $p) {
+      open my $fh, '<', $p or die;
+      while (<$fh>) {
+        chomp;
+        s/#.*//;
+        s/^\s+//;
+        s/\s+$//;
+        next unless $_;
+
+        if (/$re_dir/) {
+          $dir = $1;
+        }
+        elsif (/$re_id/) {
+          $db{$dir}{data}{$1} = $_;
+          push @{$db{$dir}{id}}, $1;
+        }
+      }
+      close $fh;
+    }
+    else {
+      $log->warn("can not accesss, skip: $p");
+    }
+  }
+
+  return \%db;
+}
+
 sub do_format_patch {
-  my $outdir = $opt{outdir} || 'patch';
+  my $output = $opt{output} || 'patch';
   my $query  = $opt{query}  || '-1';
   my @repos  = resolve_list(@_);
   my $root   = $opt{root}   || '.';
+
+  # if the query is a file, regard it as commit list
+  my $db;
+  if (-e $query && -f $query) {
+    $log->info("commit list: $query");
+    $db = parse_commit_list($query);
+
+    # if no repos provided, export all repos in commit list
+    push @repos, sort keys %$db unless @repos;
+  }
 
   my ($ttl, $cnt) = (scalar(@repos), 1);
   for my $repo (@repos) {
     $log->info("[$cnt / $ttl] processing: $repo");
     $cnt++;
 
-    my $source = catdir($root,   $repo);
-    my $target = catdir($outdir, $repo);
+    my $source = catdir($root, $repo);
+    my $target = rel2abs(catdir($output, $repo));
 
     unless (-e $source) {
       $log->warn("not exist, skip: $source");
@@ -743,24 +798,29 @@ sub do_format_patch {
       $log->info("output: $target");
       make_path($target) unless -e $target;
 
-      for ($source) {
-        $source = catdir($source, '.git') unless /\.git$/;
+      my $git_dir = $source;
+      for ($git_dir) {
+        $git_dir = catdir($git_dir, '.git') unless /\.git$/;
       }
-      my $r = Git::Repository->new(git_dir => $source);
-      my $c
-        = $r->command('format-patch', '-o', rel2abs($target), '-q', $query);
-      my $o = $c->stdout;
-      my $e = $c->stderr;
+      my $r = Git::Repository->new(git_dir => $git_dir);
 
-      while (<$o>) {
-        print STDOUT $_;
+      if ($db) {
+        if (exists $db->{$repo}) {
+          my $i = 1;
+          for my $id (@{$db->{$repo}{id}}) {
+            $log->info('processing: ' . $db->{$repo}{data}{$id});
+            print "$_\n"
+              for $r->run('format-patch', '-o', $target, '--start-number',
+              $i++, '-1', $id);
+          }
+        }
+        else {
+          $log->warn("not defined in commit list, skip: $source");
+        }
       }
-
-      while (<$e>) {
-        print STDERR $_;
+      else {
+        print "$_\n" for $r->run('format-patch', '-o', $target, '-q', $query);
       }
-
-      $c->close;
     }
   }
 }
