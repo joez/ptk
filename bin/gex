@@ -59,29 +59,29 @@ DESCRIPTION
     To manage the Git repos
 
 COMMAND
-    $script report-log [-r <root>] [-f <file>] [-q <query>] [<src>...]
+    $script report-log [-r <root>] [-o <output>] [-q <query>] [<src>...]
       export Git log into spreadsheet
-      <query>: the parameters passed to "git log"
-      <file>:  spreadsheet file path, default "log.xlsx"
-      <src>:   relative git repo paths
+      <query>:  the parameters passed to "git log"
+      <output>: spreadsheet file path, default "log.xlsx"
+      <src>:    relative git repo paths
 
-    $script report-delta [-r <root>] [-f <file>] [-b <base>] <this>
+    $script report-delta [-r <root>] [-o <output>] [-b <base>] <this>
     <that> [<src>...]
       export commit list need to be integrated from <that> to <this>
       as an spreadsheet
-      <file>:  spreadsheet file path, default "delta.xlsx"
-      <base>:  up to and including <base> are not reported on <that>
-      <this>:  working branch
-      <that>:  remote branch, mostly upstream
-      <src>:   relative Git repo paths
+      <output>: spreadsheet file path, default "delta.xlsx"
+      <base>:   up to and including <base> are not reported on <that>
+      <this>:   working branch
+      <that>:   remote branch, mostly upstream
+      <src>:    relative Git repo paths
 
-    $script report-manifest [-u <url>] [-m <manifest>] [-f <file>]
+    $script report-manifest [-u <url>] [-m <manifest>] [-o <output>]
     [-q <query>] [<src>...]
       export manifest information into spreadsheet
       <url>:      manifest repo url, default ".repo/manifests"
       <manifest>: alternative manifest, default "default.xml"
       <query>:    same as in "dump-repo"
-      <file>:     spreadsheet file path, default "manifest.xlsx"
+      <output>:   spreadsheet file path, default "manifest.xlsx"
       <src>:      manifest branches, default as HEAD
 
     $script forall [-r <root>] [-u <url>] [-m <manifest>]
@@ -159,7 +159,7 @@ OPTIONS
     -m, --manifest
       the alternative manifest file to use, default is "default.xml"
 
-    -f, --file
+    -o, --output
       the output file path
 
     <src>
@@ -177,7 +177,7 @@ EXAMPLES
       dump all the git repo paths in the default manifest "default.xml"
       with "groups" matches "device" AND "revision" matches "master"
 
-    4. $script dump-repo | xargs $script report-log -f all.xlsx
+    4. $script dump-repo | xargs $script report-log -o all.xlsx
       export all the commits of repos in default manifest to "all.xlsx"
 
     5. $script find-repo > repo-list.txt
@@ -234,7 +234,6 @@ EOF
 my %opt = (
   root     => '.',
   query    => '',
-  file     => '',
   base     => '',
   url      => '.repo/manifests',
   manifest => 'default.xml',
@@ -246,7 +245,6 @@ my $help;
 GetOptions(
   "help|h"       => \$help,
   "root|r=s"     => \$opt{root},
-  "file|f=s"     => \$opt{file},
   "query|q=s"    => \$opt{query},
   "base|b=s"     => \$opt{base},
   "url|u=s"      => \$opt{url},
@@ -351,7 +349,7 @@ sub do_report_manifest {
   my @revs = @_;
   unshift @revs, 'HEAD' unless @revs;
 
-  my $dst      = $opt{file} || 'manifest.xlsx';
+  my $dst      = $opt{output} || 'manifest.xlsx';
   my $url      = $opt{url};
   my $manifest = $opt{manifest};
   my $query    = $opt{query};
@@ -997,7 +995,7 @@ sub do_match_cherry {
 }
 
 sub do_report_log {
-  my $dst = $opt{file} || 'log.xlsx';
+  my $dst = $opt{output} || 'log.xlsx';
 
   my $db = {};
   $db->{meta}{refs}{query} = $opt{query};
@@ -1019,7 +1017,7 @@ sub do_report_delta {
   my $that = shift or usage();
   my $base = $opt{base};
 
-  my $dst = $opt{file} || 'delta.xlsx';
+  my $dst = $opt{output} || 'delta.xlsx';
 
   my $db = {};
   $db->{meta}{refs}{base} = $base;
