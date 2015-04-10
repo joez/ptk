@@ -127,13 +127,14 @@ COMMAND
       <that>: remote branch, mostly upstream
       <src>:  relative Git repo paths
 
-    $script overlay-manifest <this> <that> [<src>...]
-      overlay each Git repo's revision defined in <this> manifest with
+    $script overlay-manifest [-f <field>] <this> <that> [<src>...]
+      overlay each Git repo's fields defined in <this> manifest by
       one defined in <that> manifest, generally <that> manifest is a
       snapshot, by this way to pin some Git repo in a stable revision
-      <this>: the target manifest
-      <that>: the snapshot manifest to be applied
-      <src>:  the Git repo paths or names
+      <field>: fields to apply, joined by ",", default is "revision"
+      <this>:  the target manifest
+      <that>:  the snapshot manifest to be applied
+      <src>:   the Git repo paths or names
 
     $script find-repo [<src>...]
       find valid Git repo in the <src> directories and output the paths,
@@ -214,7 +215,7 @@ EXAMPLES
       save the patches into "exported-patch" folder
 
     13. $script overlay-manifest default.xml snapshot.xml repo-list.txt
-      overlay repo's revision defined in default.xml with one defined in
+      overlay repo's revision defined in default.xml by one defined in
       snapshot.xml, only the repo name in "repo-list.txt" is applied
 
     14. $script tag-manifest -u . -m pin.xml TAG_FOR_TEST repo-list.txt
@@ -236,6 +237,7 @@ EOF
 my %opt = (
   root     => '.',
   query    => '',
+  field    => '',
   base     => '',
   url      => '.repo/manifests',
   manifest => 'default.xml',
@@ -248,6 +250,7 @@ GetOptions(
   "help|h"       => \$help,
   "root|r=s"     => \$opt{root},
   "query|q=s"    => \$opt{query},
+  "field|f=s"    => \$opt{field},
   "base|b=s"     => \$opt{base},
   "url|u=s"      => \$opt{url},
   "manifest|m=s" => \$opt{manifest},
@@ -833,6 +836,9 @@ sub do_overlay_manifest {
   my $that = shift or die;
   die "cannot read file: $that" unless -r $that;
 
+  my $field = $opt{field} || 'revision';
+  my @fields = split /,/, $field;
+
   my %wanted = map { ($_ => 1) } resolve_list(@_);
 
   my $da = parse_manifest($this);
@@ -841,15 +847,22 @@ sub do_overlay_manifest {
   local @ARGV = ($this, @{$da->{include}{seen}});
   local $^I = '';
   while (<>) {
-    if (/name="(.+?)"/ or /path="(.+?)"/) {
-      my $n = $1;
-      my $d = get_resolved_project($db, $n);
-      if ($wanted{$n} && $d) {
-        my $rev = $d->{revision};
+    if (/<project/ && /name="([^"]+?)"/) {
+      if (my $d = get_resolved_project($db, $1)) {
+        my ($n, $p) = @{$d}{qw/name path/};
 
-        $log->debug("overlay $n revision to $rev");
-        unless (s/revision="(.+?)"/revision="$rev"/) {
-          s|\s*?(/?>)\s*?$| revision="$rev" $1|;
+        # both name and path are accepted
+        if ($wanted{$n} || $wanted{$p}) {
+          $log->info("overlay $n");
+          for my $k (@fields) {
+            my $v = $d->{$k};
+            next unless $v;
+
+            $log->debug(qq/$k to "$v"/);
+            unless (s/$k="(?:[^"]*?)"/$k="$v"/) {
+              s|\s*?(/?>)\s*?$| $k="$v" $1|;
+            }
+          }
         }
       }
     }
