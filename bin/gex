@@ -772,6 +772,71 @@ sub parse_commit_list {
   return \%db;
 }
 
+sub save_apply_patch_script {
+  my $path = shift || 'apply-patch';
+
+  if (-e $path) {
+    warn "file already exists, skip: $path";
+  }
+  else {
+    my $dir = dirname($path);
+    make_path($dir) unless -e $dir;
+    open my $fh, '>', $path or die;
+
+    print $fh <<'EOF';
+#!/usr/bin/env perl
+# author: joe.zheng
+
+use strict;
+use warnings;
+
+use File::Path qw/make_path/;
+use File::Basename;
+use File::Copy;
+use File::Spec::Functions qw/catdir catfile abs2rel rel2abs/;
+use File::Find qw/find/;
+
+my $self = abs2rel(dirname($0));
+
+my $root = shift || catdir($self, 'exported');
+my $work = shift || '.';
+my $back = shift || catdir($self, 'imported');
+
+print qq/apply patches from "$root" to "$work", move to "$back" if success/;
+
+my %todo;
+my @fail;
+
+my $wanted = sub { push @{$todo{$File::Find::dir}}, $_ if /\.patch$/ };
+find({wanted => $wanted, preprocess => sub {grep { !/^\./ } @_}}, $root);
+
+local $\ = "\n";
+for my $p (sort keys %todo) {
+  my $d = abs2rel($p, $root);
+  my $repo = catdir($work, $d);
+  next unless -e $repo;
+
+  for my $f (sort @{$todo{$p}}) {
+    my $patch = catfile($p, $f);
+	print "\n# $patch";
+
+    if (system(qw/git -C/, $repo, qw/am -k -3/, rel2abs($patch)) == 0) {
+      my $d = catdir($back, $d);
+      make_path($d) unless -e $d;
+      move($patch, catfile($d, $f)) or die;
+    }
+	else {
+	  push @fail, $patch;
+	}
+  }
+}
+EOF
+
+    close $fh;
+    chmod 0755, $path;
+  }
+}
+
 sub do_format_patch {
   my $output = $opt{output} || 'patch';
   my $query  = $opt{query}  || '-1';
@@ -788,13 +853,17 @@ sub do_format_patch {
     push @repos, sort keys %$db unless @repos;
   }
 
+  # save script first
+  save_apply_patch_script(catfile($output, 'apply-patch')) if @repos;
+
   my ($ttl, $cnt) = (scalar(@repos), 1);
   for my $repo (@repos) {
     $log->info("[$cnt / $ttl] processing: $repo");
     $cnt++;
 
+    # standard output sub-folder: exported
     my $source = catdir($root, $repo);
-    my $target = rel2abs(catdir($output, $repo));
+    my $target = rel2abs(catdir($output, 'exported', $repo));
 
     unless (-e $source) {
       $log->warn("not exist, skip: $source");
