@@ -28,6 +28,8 @@ use Storable qw/nstore retrieve/;
 use Text::ParseWords;
 use Digest::MD5 qw/md5_hex/;
 
+use Parallel::ForkManager;
+
 use Ptk::Base::Log;
 use Ptk::Base::Chdir;
 
@@ -84,7 +86,7 @@ COMMAND
       <output>:   spreadsheet file path, default "manifest.xlsx"
       <src>:      manifest branches, default as HEAD
 
-    $script forall [-r <root>] [-u <url>] [-m <manifest>]
+    $script forall [-r <root>] [-u <url>] [-m <manifest>] [-j <jobs>]
     [-c <command>] [<src>...]
       run the same shell command in each repo, with cwd as current
       repo's work tree, environment variables are set:
@@ -98,6 +100,7 @@ COMMAND
       <url>:      manifest repo url, default ".repo/manifests"
       <manifest>: alternative manifest, default "default.xml"
       <command>:  command to run, default is "git status"
+      <jobs>:     concurret jobs to run, default is 4
       <src>:      relative Git repo paths
 
     $script tag-manifest [-r <root>] [-u <url>] [-m <manifest>]
@@ -241,6 +244,7 @@ my %opt = (
   base     => '',
   url      => '.repo/manifests',
   manifest => 'default.xml',
+  jobs     => 4,
   output   => '',
   command  => ''
 );
@@ -254,6 +258,7 @@ GetOptions(
   "base|b=s"     => \$opt{base},
   "url|u=s"      => \$opt{url},
   "manifest|m=s" => \$opt{manifest},
+  "jobs|j=i"     => \$opt{jobs},
   "command|c=s"  => \$opt{command},
   "output|o=s"   => \$opt{output},
 ) or usage();
@@ -674,10 +679,21 @@ sub do_forall {
   }
 
   my %done;
-  my ($ttl, $cnt) = (scalar(@repos), 1);
+  my $fm = Parallel::ForkManager->new($opt{jobs});
+
+  # ($pid, $exit_code, $id) = @_
+  $fm->run_on_finish(sub { $done{$_[2]}++ unless $_[1] });
+
+  my ($ttl, $cnt) = (scalar(@repos), 0);
   for my $repo (@repos) {
-    $log->info("[$cnt / $ttl] processing: $repo");
     $cnt++;
+
+    $fm->start($repo) and next;
+
+    # child process now
+    my $exit_code = -1;
+
+    $log->info("[$cnt / $ttl] processing: $repo");
     print "#-- project: $repo\n";
 
     my $path    = resolve_path($repo);
@@ -700,23 +716,25 @@ sub do_forall {
     }
     $log->debug($env);
 
-    eval {
-      my $chdir = Ptk::Base::Chdir->new;
-      unless ($chdir->pushd($path)) {
-        $log->warn("fail to access $path, skip: $repo");
+    my $chdir = Ptk::Base::Chdir->new;
+    unless ($chdir->pushd($path)) {
+      $log->warn("fail to access $path, skip: $repo");
+    }
+    else {
+      local %ENV = (%ENV, %$env);
+
+      if (system($cmd)) {
+        $log->warn("fail to process: $repo");
       }
       else {
-        local %ENV = (%ENV, %$env);
-
-        if (system($cmd)) {
-          $log->warn("fail to process: $repo");
-        }
-        else {
-          $done{$repo}++;
-        }
+        $exit_code = 0;
       }
-    };
+    }
+
+    $fm->finish($exit_code);
   }
+
+  $fm->wait_all_children;
 
   print <<EOF;
 #-- DONE
