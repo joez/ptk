@@ -4,10 +4,12 @@ use Mojo::Base 'Mojo::Asset';
 use Mojo::Asset::File;
 use Mojo::Util 'spurt';
 
+# Last modified default
+my $MTIME = time;
+
 has 'auto_upgrade';
 has max_memory_size => sub { $ENV{MOJO_MAX_MEMORY_SIZE} || 262144 };
-
-sub new { shift->SUPER::new(@_, content => '') }
+has mtime => sub {$MTIME};
 
 sub add_chunk {
   my ($self, $chunk) = @_;
@@ -24,7 +26,7 @@ sub contains {
   my ($self, $str) = @_;
 
   my $start = $self->start_range;
-  my $pos = index $self->{content}, $str, $start;
+  my $pos = index $self->{content} // '', $str, $start;
   $pos -= $start if $start && $pos >= 0;
   my $end = $self->end_range;
 
@@ -40,7 +42,7 @@ sub get_chunk {
     $max = $end + 1 - $offset if ($offset + $max) > $end;
   }
 
-  return substr shift->{content}, $offset, $max;
+  return substr shift->{content} // '', $offset, $max;
 }
 
 sub move_to {
@@ -49,9 +51,9 @@ sub move_to {
   return $self;
 }
 
-sub size { length shift->{content} }
+sub size { length(shift->{content} // '') }
 
-sub slurp { shift->{content} }
+sub slurp { shift->{content} // '' }
 
 1;
 
@@ -75,8 +77,8 @@ L<Mojo::Asset::Memory> is an in-memory storage backend for HTTP content.
 
 =head1 EVENTS
 
-L<Mojo::Asset::Memory> inherits all events from L<Mojo::Asset> and can emit
-the following new ones.
+L<Mojo::Asset::Memory> inherits all events from L<Mojo::Asset> and can emit the
+following new ones.
 
 =head2 upgrade
 
@@ -99,10 +101,10 @@ implements the following new ones.
 
 =head2 auto_upgrade
 
-  my $upgrade = $mem->auto_upgrade;
-  $mem        = $mem->auto_upgrade(1);
+  my $bool = $mem->auto_upgrade;
+  $mem     = $mem->auto_upgrade($bool);
 
-Try to detect if content size exceeds C<max_memory_size> limit and
+Try to detect if content size exceeds L</"max_memory_size"> limit and
 automatically upgrade to a L<Mojo::Asset::File> object.
 
 =head2 max_memory_size
@@ -112,18 +114,19 @@ automatically upgrade to a L<Mojo::Asset::File> object.
 
 Maximum size in bytes of data to keep in memory before automatically upgrading
 to a L<Mojo::Asset::File> object, defaults to the value of the
-MOJO_MAX_MEMORY_SIZE environment variable or C<262144>.
+C<MOJO_MAX_MEMORY_SIZE> environment variable or C<262144> (256KB).
+
+=head2 mtime
+
+  my $mtime = $mem->mtime;
+  $mem      = $mem->mtime(1408567500);
+
+Modification time of asset, defaults to the time this class was loaded.
 
 =head1 METHODS
 
 L<Mojo::Asset::Memory> inherits all methods from L<Mojo::Asset> and implements
 the following new ones.
-
-=head2 new
-
-  my $mem = Mojo::Asset::Memory->new;
-
-Construct a new L<Mojo::Asset::Memory> object.
 
 =head2 add_chunk
 
@@ -144,7 +147,7 @@ Check if asset contains a specific string.
   my $bytes = $mem->get_chunk($offset, $max);
 
 Get chunk of data starting from a specific position, defaults to a maximum
-chunk size of C<131072> bytes.
+chunk size of C<131072> bytes (128KB).
 
 =head2 move_to
 

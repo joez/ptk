@@ -1,66 +1,52 @@
 package Mojo::Home;
 use Mojo::Base -base;
-use overload
-  'bool'   => sub {1},
-  '""'     => sub { shift->to_string },
-  fallback => 1;
+use overload bool => sub {1}, '""' => sub { shift->to_string }, fallback => 1;
 
 use Cwd 'abs_path';
 use File::Basename 'dirname';
 use File::Find 'find';
 use File::Spec::Functions qw(abs2rel catdir catfile splitdir);
 use FindBin;
-use Mojo::Util qw(class_to_path slurp);
+use Mojo::Util 'class_to_path';
 
-sub new { shift->SUPER::new->parse(@_) }
+has parts => sub { [] };
 
 sub detect {
-  my $self = shift;
+  my ($self, $class) = @_;
 
   # Environment variable
-  if ($ENV{MOJO_HOME}) {
-    $self->{parts} = [splitdir(abs_path $ENV{MOJO_HOME})];
-    return $self;
-  }
+  return $self->parts([splitdir abs_path $ENV{MOJO_HOME}]) if $ENV{MOJO_HOME};
 
   # Try to find home from lib directory
-  if (my $class = @_ ? shift : 'Mojo::HelloWorld') {
-    my $file = class_to_path $class;
-    if (my $path = $INC{$file}) {
-      $path =~ s/$file$//;
-      my @home = splitdir $path;
+  if ($class && (my $path = $INC{my $file = class_to_path $class})) {
+    $path =~ s/\Q$file\E$//;
+    my @home = splitdir $path;
 
-      # Remove "lib" and "blib"
-      pop @home while @home && ($home[-1] =~ /^b?lib$/ || $home[-1] eq '');
+    # Remove "lib" and "blib"
+    pop @home while @home && ($home[-1] =~ /^b?lib$/ || $home[-1] eq '');
 
-      # Turn into absolute path
-      $self->{parts} = [splitdir(abs_path(catdir(@home) || '.'))];
-    }
+    # Turn into absolute path
+    return $self->parts([splitdir abs_path catdir(@home) || '.']);
   }
 
   # FindBin fallback
-  $self->{parts} = [split /\//, $FindBin::Bin] unless $self->{parts};
-
-  return $self;
+  return $self->parts([split '/', $FindBin::Bin]);
 }
 
 sub lib_dir {
-  my $path = catdir @{shift->{parts} || []}, 'lib';
+  my $path = catdir @{shift->parts}, 'lib';
   return -d $path ? $path : undef;
 }
 
 sub list_files {
   my ($self, $dir) = @_;
 
-  # Files relative to directory
-  my $parts = $self->{parts} || [];
-  my $root = catdir @$parts;
-  $dir = catdir $root, split '/', ($dir || '');
+  $dir = catdir @{$self->parts}, split('/', $dir // '');
   return [] unless -d $dir;
   my @files;
   find {
     wanted => sub {
-      my @parts = splitdir(abs2rel($File::Find::name, $dir));
+      my @parts = splitdir abs2rel($File::Find::name, $dir);
       push @files, join '/', @parts unless grep {/^\./} @parts;
     },
     no_chdir => 1
@@ -69,18 +55,16 @@ sub list_files {
   return [sort @files];
 }
 
-sub mojo_lib_dir { catdir(dirname(__FILE__), '..') }
+sub mojo_lib_dir { catdir dirname(__FILE__), '..' }
 
-sub parse {
-  my ($self, $path) = @_;
-  $self->{parts} = [splitdir $path] if defined $path;
-  return $self;
-}
+sub new { @_ > 1 ? shift->SUPER::new->parse(@_) : shift->SUPER::new }
 
-sub rel_dir { catdir(@{shift->{parts} || []}, split '/', shift) }
-sub rel_file { catfile(@{shift->{parts} || []}, split '/', shift) }
+sub parse { shift->parts([splitdir shift]) }
 
-sub to_string { catdir(@{shift->{parts} || []}) }
+sub rel_dir  { catdir @{shift->parts},  split('/', shift) }
+sub rel_file { catfile @{shift->parts}, split('/', shift) }
+
+sub to_string { catdir @{shift->parts} }
 
 1;
 
@@ -105,25 +89,29 @@ Mojo::Home - Home sweet home!
 
 L<Mojo::Home> is a container for home directories.
 
+=head1 ATTRIBUTES
+
+L<Mojo::Home> implements the following attributes.
+
+=head2 parts
+
+  my $parts = $home->parts;
+  $home     = $home->parts([]);
+
+Home directory parts.
+
 =head1 METHODS
 
 L<Mojo::Home> inherits all methods from L<Mojo::Base> and implements the
 following new ones.
-
-=head2 new
-
-  my $home = Mojo::Home->new;
-  my $home = Mojo::Home->new('/home/sri/myapp');
-
-Construct a new L<Mojo::Home> object and C<parse> home directory if necessary.
 
 =head2 detect
 
   $home = $home->detect;
   $home = $home->detect('My::App');
 
-Detect home directory from the value of the MOJO_HOME environment variable or
-application class.
+Detect home directory from the value of the C<MOJO_HOME> environment variable
+or application class.
 
 =head2 lib_dir
 
@@ -147,9 +135,17 @@ directory.
 
 Path to C<lib> directory in which L<Mojolicious> is installed.
 
+=head2 new
+
+  my $home = Mojo::Home->new;
+  my $home = Mojo::Home->new('/home/sri/my_app');
+
+Construct a new L<Mojo::Home> object and L</"parse"> home directory if
+necessary.
+
 =head2 parse
 
-  $home = $home->parse('/home/sri/myapp');
+  $home = $home->parse('/home/sri/my_app');
 
 Parse home directory.
 
@@ -169,9 +165,24 @@ Portably generate an absolute path for a file relative to the home directory.
 =head2 to_string
 
   my $str = $home->to_string;
-  my $str = "$home";
 
 Home directory.
+
+=head1 OPERATORS
+
+L<Mojo::Home> overloads the following operators.
+
+=head2 bool
+
+  my $bool = !!$home;
+
+Always true.
+
+=head2 stringify
+
+  my $str = "$home";
+
+Alias for L</"to_string">.
 
 =head1 SEE ALSO
 

@@ -11,15 +11,11 @@ use File::Basename qw/dirname/;
 
 use Mojo::Util qw/encode/;
 
-has dumper => sub { Data::Dumper->new([])->Terse(1)->Deepcopy(1)->Indent(0)->Pair(':') };
-has append => 1;
+has level => sub { $ENV{PTK_LOG_LEVEL} // 'debug' };
+has format => sub { \&_format };
 
-my $LEVEL = {debug => 1, info => 2, warn => 3, error => 4, fatal => 5};
-
-sub is_level {
-  my ($self, $level) = @_;
-  return $LEVEL->{lc $level} >= $LEVEL->{$ENV{PTK_LOG_LEVEL} || $self->level};
-}
+my $_dumper
+  = Data::Dumper->new([])->Terse(1)->Deepcopy(1)->Indent(0)->Pair(':');
 
 has handle => sub {
   my $self = shift;
@@ -29,8 +25,7 @@ has handle => sub {
     my $dir = dirname($path);
     make_path($dir) unless -e $dir;
 
-    open my $fh, $self->append ? '>>' : '>', $path
-      or croak qq/Can't open log file "$path": $!/;
+    open my $fh, '>>', $path or croak qq/Can't open log file "$path": $!/;
     return $fh;
   }
 
@@ -38,23 +33,23 @@ has handle => sub {
   return \*STDERR;
 };
 
-sub format {
-  my ($self, $level, @msgs) = @_;
+sub _format {
+  my ($time, $level, @msgs) = @_;
 
-  my $msg = @msgs < 1 ? '' : @msgs == 1
-    && !ref $msgs[0] ? $msgs[0] : $self->_dump(@msgs);
+  my $msg
+    = @msgs < 1 ? '' : @msgs == 1 && !ref $msgs[0] ? $msgs[0] : _dump(@msgs);
 
-  return encode 'UTF-8', '[' . _timestamp() . "] [$level] " . $msg . "\n";
+  return _timestamp($time) . " $level $$: " . $msg . "\n";
 }
 
 sub _timestamp {
-  my ($sec, $min, $hour, $mday, $mon, $year) = localtime;
+  my ($sec, $min, $hour, $mday, $mon, $year) = localtime $_[0];
 
   return
     sprintf('%02d-%02d %02d:%02d:%02d', $mon + 1, $mday, $hour, $min, $sec);
 }
 
-sub _dump { join ', ', shift->dumper->Values(\@_)->Dump }
+sub _dump { join ', ', $_dumper->Values(\@_)->Dump }
 
 1;
 __END__

@@ -10,8 +10,8 @@ has log    => sub { Ptk::Base::Log->new };
 has loader => sub { Ptk::Base::Loader->new };
 
 sub tap {
-  my ($self, $cb) = @_;
-  $_->$cb for $self;
+  my ($self, $cb) = (shift, shift);
+  $_->$cb(@_) for $self;
   return $self;
 }
 
