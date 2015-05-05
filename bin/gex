@@ -316,7 +316,8 @@ sub resolve_list {
     }
   }
 
-  return @list;
+  # remove trailing slash
+  return map { s|/+$|| if $_ ne '/'; $_ } @list;
 }
 
 sub resolve_path {
