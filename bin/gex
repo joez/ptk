@@ -33,7 +33,6 @@ use Parallel::ForkManager;
 use Ptk::Base::Log;
 use Ptk::Base::Chdir;
 use Ptk::Gex::Manifest;
-use Ptk::Gex::Matcher;
 
 my $log = Ptk::Base::Log->new;
 
@@ -367,7 +366,6 @@ sub do_report_manifest {
   my $manifest = $opt{manifest};
   my $query    = $opt{query};
 
-  my $q  = Ptk::Gex::Matcher->new->pattern($query)->init;
   my $db = {};
   $db->{meta}{$_} = {} for qw/path remote fetch review revs/;
   $db->{meta}{info}{query}    = $query;
@@ -382,7 +380,7 @@ sub do_report_manifest {
 
     my $f = catfile($dir, $manifest);
     my $m = Ptk::Gex::Manifest->new->files([$f])->init;
-    for my $n ($m->list_project_names($q)) {
+    for my $n ($m->list_project_names($query)) {
       my $r = $m->get_resolved_project($n);
       my $p = $r->{path};
       $db->{data}{$rev}{$p} = $r;
@@ -562,12 +560,11 @@ sub do_dump_repo {
   unshift @manifests, catfile(@opt{qw/url manifest/}) unless @manifests;
 
   my $query = $opt{query} || '';
-  my $q = Ptk::Gex::Matcher->new->pattern($query)->init;
 
   local $\ = "\n";
   for my $f (@manifests) {
     my $m = Ptk::Gex::Manifest->new->files([$f])->init;
-    print $_ for sort +$m->list_project_paths($q);
+    print $_ for sort +$m->list_project_paths($query);
   }
 }
 

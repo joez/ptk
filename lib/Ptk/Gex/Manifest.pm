@@ -2,6 +2,7 @@
 
 package Ptk::Gex::Manifest;
 use Ptk::Base -base;
+use Ptk::Gex::Matcher;
 
 use Carp 'croak';
 
@@ -106,12 +107,13 @@ sub get_resolved_project {
 }
 
 sub list_project_names {
-  my $self    = shift;
-  my $matcher = shift;
+  my $self  = shift;
+  my $query = shift;
 
-  return @{$self->projects} unless $matcher;
+  return @{$self->projects} unless $query;
 
-  my @result = ();
+  my $matcher = Ptk::Gex::Matcher->new->pattern($query)->init;
+  my @result  = ();
   for (@{$self->projects}) {
     push @result, $_ if $matcher->match($self->get_resolved_project($_));
   }
