@@ -60,7 +60,7 @@ sub del_project {
   return $self;
 }
 
-sub path_to_name { $_[0]->path_to_name->{$_[1]} }
+sub get_project_name_by_path { $_[0]->path_to_name->{$_[1]} }
 
 sub get_project {
   my $self = shift;
@@ -71,7 +71,7 @@ sub get_project {
   # first by name, then by path
   my $r = $data->{$name};
   unless ($r) {
-    $name = $self->path_to_name($name);
+    $name = $self->get_project_name_by_path($name);
     $r = $data->{$name} if $name;
   }
 
