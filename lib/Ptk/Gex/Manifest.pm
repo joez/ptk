@@ -6,6 +6,9 @@ use Ptk::Gex::Matcher;
 
 use Carp 'croak';
 
+use File::Basename;
+use File::Spec::Functions qw/catfile/;
+
 use XML::Reader qw/XML::Parsepp/;
 use XML::Writer;
 
