@@ -76,7 +76,6 @@ COMMAND
       as an spreadsheet
       <output>: spreadsheet file path, default "delta.xlsx"
       <base>:   up to and including <base> are not reported on <that>
-      <jobs>:   concurret jobs to run
       <this>:   working branch
       <that>:   remote branch, mostly upstream
       <src>:    relative Git repo paths
@@ -84,8 +83,6 @@ COMMAND
     $script report-manifest [-u <url>] [-m <manifest>] [-o <output>]
     [-q <query>] [<src>...]
       export manifest information into spreadsheet
-      <url>:      manifest repo url, default ".repo/manifests"
-      <manifest>: alternative manifest, default "default.xml"
       <query>:    same as in "dump-repo"
       <output>:   spreadsheet file path, default "manifest.xlsx"
       <src>:      manifest branches, default as HEAD
@@ -101,19 +98,14 @@ COMMAND
        * REPO_RREV:     the revision from the manifest
        * REPO_GROUPS:   the groups from the manifest if exists
        * REPO_UPSTREAM: the upstream from the manifest if exists
-      <url>:      manifest repo url, default ".repo/manifests"
-      <manifest>: alternative manifest, default "default.xml"
       <command>:  command to run, default is "git status"
-      <jobs>:     concurret jobs to run
       <src>:      relative Git repo paths
 
     $script tag-manifest [-r <root>] [-u <url>] [-m <manifest>] [-j <jobs>]
     <tag> [<src>...]
       add a tag for each repo given the revision from the manifest
       <url>:      manifest repo url, default ".repo/manifests"
-      <manifest>: alternative manifest, default "default.xml"
       <tag>:      tag name to apply
-      <jobs>:     concurret jobs to run
       <src>:      relative Git repo paths
 
     $script format-patch [-r <root>] [-q <query>] [-o <output>] [<src>...]
@@ -128,7 +120,7 @@ COMMAND
       <output>:  the output directory, default is "./patch"
       <src>:     relative Git repo paths
 
-    $script match-cherry [-r <root>] <this> <that> [<src>...]
+    $script match-cherry [-r <root>] [-j <jobs>] <this> <that> [<src>...]
       find out all the original and picked cherries with the same changeset
       (with same patch id), but different commit ids between two branches
       <this>: working branch
@@ -171,7 +163,7 @@ OPTIONS
       the alternative manifest file to use, default is "default.xml"
 
     -j, --jobs
-      concurret jobs to run, default is 2
+      concurrent jobs to run, default is 2
 
     -o, --output
       the output file path
@@ -974,40 +966,63 @@ sub do_match_cherry {
   my $db    = {};
   my @repos = resolve_list(@_);
 
-  my ($ttl, $cnt) = (scalar(@repos), 1);
-  for my $repo (@repos) {
-    my $dr = $db->{$repo} || {};
-    $db->{$repo} = $dr;
+  my $process = sub {
+    my $idx  = shift;
+    my $ctx  = shift;
+    my $repo = shift;
+    my $exit = shift;
+
+    my $cnt = $idx + 1;
+    my $ttl = $ctx->{ttl};
+    my $log = $ctx->{log};
 
     $log->info("[$cnt / $ttl] processing: $repo");
-    $cnt++;
 
-    for my $path (grep {-e} resolve_path($repo)) {
-      for ($path) {
-        $path = catdir($path, '.git') unless /\.git$/;
-      }
-      eval {
-        my $r = Git::Repository->new(git_dir => $path);
-        my $a = $r->run(qw/rev-parse --verify/, $this);
-        my $b = $r->run(qw/rev-parse --verify/, $that);
-
-        for ($r->run(qw/rev-list --no-merges --left-right/, "$a...$b")) {
-          $log->debug($_);
-          my $side = substr($_, 0, 1) eq '<' ? $this : $that;
-          my $id = substr $_, 1;
-
-          my $d = get_commit_info(git_log($r, "-1", $id)->next);
-          $d->{branch} = $side;
-          $d->{repo}   = $repo;
-
-          # compare patch-id
-          $d->{patch_id} = get_patch_id($r, $id);
-
-          $dr->{$id} = $d;
-        }
-      };
+    my $path = resolve_path($repo);
+    unless (-e $path) {
+      $log->warn("can't access path: $path");
+      $exit->(-1);
     }
-  }
+
+    $path = catdir($path, '.git') unless $path =~ /\.git$/;
+
+    my $data = {repo => $repo};
+
+    my $r = Git::Repository->new(git_dir => $path);
+    my $a = $r->run(qw/rev-parse --verify/, $this);
+    my $b = $r->run(qw/rev-parse --verify/, $that);
+
+    for ($r->run(qw/rev-list --no-merges --left-right/, "$a...$b")) {
+      $log->debug($_);
+      my $side = substr($_, 0, 1) eq '<' ? $this : $that;
+      my $id = substr $_, 1;
+
+      my $d = get_commit_info(git_log($r, "-1", $id)->next);
+      $d->{branch} = $side;
+      $d->{repo}   = $repo;
+
+      # compare patch-id
+      $d->{patch_id} = get_patch_id($r, $id);
+
+      $data->{data}{$id} = $d;
+    }
+    $exit->(0, $data);
+  };
+
+  my $on_finish = sub {
+    my ($idx, $ctx, $exit_code, $data) = @_;
+    if (!$exit_code && $data) {
+      my $repo = $data->{repo};
+      $ctx->{db}{$repo} = $data->{data};
+    }
+  };
+
+  my $ctx = {db => $db, ttl => scalar(@repos), log => $log,};
+
+  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
+    ->command($process)->context($ctx)->on_finish($on_finish)
+    ->init->execute(@repos);
+
 
   local $\ = "\n";
   my $sep = "\t";
@@ -1166,6 +1181,7 @@ sub get_patch_id {
   while (<$fd>) {
     print $fi $_;
   }
+  close $fi;
   close $fd;
 
   my $patch_id = (split ' ', <$fo>)[0];
