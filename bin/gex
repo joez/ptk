@@ -63,19 +63,20 @@ DESCRIPTION
     To manage the Git repos
 
 COMMAND
-    $script report-log [-r <root>] [-o <output>] [-j <jobs>]
-    [-q <query>] [<src>...]
+    $script report-log [-r <root>] [-o <output>] [-q <query>] [-j <jobs>]
+    [<src>...]
       export Git log into spreadsheet
       <query>:  the parameters passed to "git log"
       <output>: spreadsheet file path, default "log.xlsx"
       <src>:    relative git repo paths
 
-    $script report-delta [-r <root>] [-o <output>] [-b <base>] <this>
-    <that> [<src>...]
+    $script report-delta [-r <root>] [-o <output>] [-b <base>] [-j <jobs>]
+    <this> <that> [<src>...]
       export commit list need to be integrated from <that> to <this>
       as an spreadsheet
       <output>: spreadsheet file path, default "delta.xlsx"
       <base>:   up to and including <base> are not reported on <that>
+      <jobs>:   concurret jobs to run
       <this>:   working branch
       <that>:   remote branch, mostly upstream
       <src>:    relative Git repo paths
@@ -1053,7 +1054,7 @@ sub do_report_log {
     }
 
     my $data = parse_repo_log($repo, $path);
-    $exit->(0, {repo => $repo, data => $data});
+    $exit->(0, $data);
   };
 
   my $on_finish = sub {
@@ -1076,24 +1077,51 @@ sub do_report_log {
 sub do_report_delta {
   my $this = shift or usage();
   my $that = shift or usage();
-  my $base = $opt{base};
 
-  my $dst = $opt{output} || 'delta.xlsx';
+  my @repos = resolve_list(@_);
+  my $base  = $opt{base};
+  my $dst   = $opt{output} || 'delta.xlsx';
 
   my $db = {};
   $db->{meta}{refs}{base} = $base;
   $db->{meta}{refs}{this} = $this;
   $db->{meta}{refs}{that} = $that;
 
-  my @repos = resolve_list(@_);
-  my ($ttl, $cnt) = (scalar(@repos), 1);
-  for my $p (@repos) {
-    $log->info("[$cnt / $ttl] processing: $p");
-    $cnt++;
+  my $process = sub {
+    my $idx  = shift;
+    my $ctx  = shift;
+    my $repo = shift;
+    my $exit = shift;
 
-    parse_repo_delta($db, $_, $p, $this, $that, $base)
-      for grep {-e} resolve_path($p);
-  }
+    my $cnt = $idx + 1;
+    my $ttl = $ctx->{ttl};
+    my $log = $ctx->{log};
+
+    $log->info("[$cnt / $ttl] processing: $repo");
+
+    my $path = resolve_path($repo);
+    unless (-e $path) {
+      $log->warn("can't access path: $path");
+      $exit->(-1);
+    }
+
+    my $data = parse_repo_delta($repo, $path, $this, $that, $base);
+    $exit->(0, $data);
+  };
+
+  my $on_finish = sub {
+    my ($idx, $ctx, $exit_code, $data) = @_;
+    if (!$exit_code && $data) {
+      my $repo = $data->{repo};
+      $ctx->{db}{$_}{$repo} = $data->{$_} for qw/data match/;
+    }
+  };
+
+  my $ctx = {db => $db, ttl => scalar(@repos), log => $log,};
+
+  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
+    ->command($process)->context($ctx)->on_finish($on_finish)
+    ->init->execute(@repos);
 
   db_to_xls($dst, $db);
 }
@@ -1103,7 +1131,7 @@ sub parse_repo_log {
   my $repo = shift or die;
   my $query = $opt{query} || '--';
 
-  my $db = {};
+  my $db = {repo => $repo};
 
   for ($path) {
     $path = catdir($path, '.git') unless /\.git$/;
@@ -1245,12 +1273,13 @@ sub get_commit_info {
 }
 
 sub parse_repo_delta {
-  my $db   = shift or die;
   my $path = shift or die;
   my $repo = shift or die;
   my $this = shift or die;
   my $that = shift or die;
   my $base = shift || '';
+
+  my $db = {repo => $repo};
 
   for ($path) {
     $path = catdir($path, '.git') unless /\.git$/;
@@ -1270,8 +1299,8 @@ sub parse_repo_delta {
         $d->{repo}   = $repo;
         $d->{branch} = $that;
 
-        push @{$db->{data}{$repo}{id}}, $id;
-        $db->{data}{$repo}{data}{$id} = $d;
+        push @{$db->{data}{id}}, $id;
+        $db->{data}{data}{$id} = $d;
 
         $m->{$id} = $d;
       }
@@ -1288,8 +1317,10 @@ sub parse_repo_delta {
     }
 
     my $f = [qw/change_id origin_id ticket_id subject/];
-    $db->{match}{$repo} = check_match_cherry($m, $this, $that, $f);
+    $db->{match} = check_match_cherry($m, $this, $that, $f);
   };
+
+  return $db;
 }
 
 sub format_date {
