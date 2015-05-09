@@ -63,7 +63,8 @@ DESCRIPTION
     To manage the Git repos
 
 COMMAND
-    $script report-log [-r <root>] [-o <output>] [-q <query>] [<src>...]
+    $script report-log [-r <root>] [-o <output>] [-j <jobs>]
+    [-q <query>] [<src>...]
       export Git log into spreadsheet
       <query>:  the parameters passed to "git log"
       <output>: spreadsheet file path, default "log.xlsx"
@@ -102,15 +103,16 @@ COMMAND
       <url>:      manifest repo url, default ".repo/manifests"
       <manifest>: alternative manifest, default "default.xml"
       <command>:  command to run, default is "git status"
-      <jobs>:     concurret jobs to run, default is 4
+      <jobs>:     concurret jobs to run
       <src>:      relative Git repo paths
 
-    $script tag-manifest [-r <root>] [-u <url>] [-m <manifest>]
+    $script tag-manifest [-r <root>] [-u <url>] [-m <manifest>] [-j <jobs>]
     <tag> [<src>...]
       add a tag for each repo given the revision from the manifest
       <url>:      manifest repo url, default ".repo/manifests"
       <manifest>: alternative manifest, default "default.xml"
       <tag>:      tag name to apply
+      <jobs>:     concurret jobs to run
       <src>:      relative Git repo paths
 
     $script format-patch [-r <root>] [-q <query>] [-o <output>] [<src>...]
@@ -167,6 +169,9 @@ OPTIONS
     -m, --manifest
       the alternative manifest file to use, default is "default.xml"
 
+    -j, --jobs
+      concurret jobs to run, default is 2
+
     -o, --output
       the output file path
 
@@ -192,9 +197,10 @@ EXAMPLES
       find out all the valid Git repo paths in the current directory
       and redirect to repo-list.txt for later usage
 
-    6. $script report-log -q 'develop..upstream' repo-list.txt
-      export the commit list between "develop" and "upsteam" branches,
-      of the Git repos in the "repo-list.txt", and export to "log.xlsx"
+    6. $script report-log -j 4 -q 'develop..upstream' repo-list.txt
+      export the commits between "develop" and "upsteam" branches,
+      for the Git repos in the "repo-list.txt", and export to "log.xlsx"
+	  with maximal concurrent 4 jobs
 
     7. $script forall Ptk
       run "git status" in Git repo "Ptk"
@@ -246,7 +252,7 @@ my %opt = (
   base     => '',
   url      => '.repo/manifests',
   manifest => 'default.xml',
-  jobs     => 4,
+  jobs     => 2,
   output   => '',
   command  => ''
 );
@@ -1023,17 +1029,46 @@ sub do_match_cherry {
 sub do_report_log {
   my $dst = $opt{output} || 'log.xlsx';
 
+  my @repos = resolve_list(@_);
+
   my $db = {};
   $db->{meta}{refs}{query} = $opt{query};
 
-  my @repos = resolve_list(@_);
-  my ($ttl, $cnt) = (scalar(@repos), 1);
-  for my $p (@repos) {
-    $log->info("[$cnt / $ttl] processing: $p");
-    $cnt++;
+  my $process = sub {
+    my $idx  = shift;
+    my $ctx  = shift;
+    my $repo = shift;
+    my $exit = shift;
 
-    parse_repo_log($db, $_, $p) for grep {-e} resolve_path($p);
-  }
+    my $cnt = $idx + 1;
+    my $ttl = $ctx->{ttl};
+    my $log = $ctx->{log};
+
+    $log->info("[$cnt / $ttl] processing: $repo");
+
+    my $path = resolve_path($repo);
+    unless (-e $path) {
+      $log->warn("can't access path: $path");
+      $exit->(-1);
+    }
+
+    my $data = parse_repo_log($repo, $path);
+    $exit->(0, {repo => $repo, data => $data});
+  };
+
+  my $on_finish = sub {
+    my ($idx, $ctx, $exit_code, $data) = @_;
+    if (!$exit_code && $data) {
+      my $repo = $data->{repo};
+      $ctx->{db}{data}{$repo} = $data->{data};
+    }
+  };
+
+  my $ctx = {db => $db, ttl => scalar(@repos), log => $log,};
+
+  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
+    ->command($process)->context($ctx)->on_finish($on_finish)
+    ->init->execute(@repos);
 
   db_to_xls($dst, $db);
 }
@@ -1064,10 +1099,11 @@ sub do_report_delta {
 }
 
 sub parse_repo_log {
-  my $db   = shift or die;
   my $path = shift or die;
   my $repo = shift or die;
   my $query = $opt{query} || '--';
+
+  my $db = {};
 
   for ($path) {
     $path = catdir($path, '.git') unless /\.git$/;
@@ -1082,10 +1118,12 @@ sub parse_repo_log {
       $d->{repo} = $repo;
       $log->info($d->{commit});
 
-      push @{$db->{data}{$repo}{id}}, $d->{commit};
-      $db->{data}{$repo}{data}{$d->{commit}} = $d;
+      push @{$db->{id}}, $d->{commit};
+      $db->{data}{$d->{commit}} = $d;
     }
   };
+
+  return $db;
 }
 
 sub get_patch_id {
