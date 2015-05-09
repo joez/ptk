@@ -6,7 +6,8 @@ use Ptk::Base -base;
 use Parallel::ForkManager;
 
 has max_workers => 1;
-has cmd         => sub {
+has context     => sub { {} };
+has command     => sub {
   sub { }
 };
 has [qw/on_start on_finish/] => sub {
@@ -28,14 +29,16 @@ sub execute {
   $fm->run_on_finish(sub { $self->_on_finish(@_[qw/2 1 5/]) });
 
   # ($exit_code, $data_reference)
-  my $yield = sub { $fm->finish(@_) };
+  my $exit = sub { $fm->finish(@_) };
 
   for (my $idx = 0; $idx < $ttl; $idx++) {
     my $job = $_[$idx];
 
     $fm->start($idx) and next;
 
-    $self->cmd->($job, $yield, $idx, $ttl);
+    # child process here
+    # your change in $context will not reflect in parent
+    $self->command->($idx, $self->context, $job, $exit);
   }
 
   return $fm->wait_all_children;
@@ -46,7 +49,7 @@ sub _on_start {
 
   my ($idx, $ttl) = @_;
 
-  return $self->on_start->($idx, $ttl);
+  return $self->on_start->($idx, $self->context);
 }
 
 sub _on_finish {
@@ -54,7 +57,8 @@ sub _on_finish {
 
   my ($idx, $exit_code, $data) = @_;
 
-  return $self->on_finish->($idx, $exit_code, $data);
+  return $self->on_finish->($idx, $self->context, $exit_code, $data);
 }
+
 1;
 __END__
