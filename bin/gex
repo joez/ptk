@@ -33,6 +33,7 @@ use Parallel::ForkManager;
 use Ptk::Base::Log;
 use Ptk::Base::Chdir;
 use Ptk::Gex::Manifest;
+use Ptk::Base::Executor;
 
 my $log = Ptk::Base::Log->new;
 
@@ -593,19 +594,16 @@ sub do_forall {
     $log->warn("can't access manifest: $manifest");
   }
 
-  my %done;
-  my $fm = Parallel::ForkManager->new($opt{jobs});
+  my $process = sub {
+    my $idx  = shift;
+    my $ctx  = shift;
+    my $repo = shift;
+    my $exit = shift;
 
-  # ($pid, $exit_code, $id) = @_
-  $fm->run_on_finish(sub { $done{$_[2]}++ unless $_[1] });
+    my $cnt = $idx + 1;
+    my $ttl = $ctx->{ttl};
+    my $log = $ctx->{log};
 
-  my ($ttl, $cnt) = (scalar(@repos), 0);
-  for my $repo (@repos) {
-    $cnt++;
-
-    $fm->start($repo) and next;
-
-    # child process now
     my $exit_code = -1;
 
     $log->info("[$cnt / $ttl] processing: $repo");
@@ -646,17 +644,26 @@ sub do_forall {
       }
     }
 
-    $fm->finish($exit_code);
-  }
+    $exit->($exit_code);
+  };
 
-  $fm->wait_all_children;
+  my $on_finish = sub {
+    my ($idx, $ctx, $exit_code) = @_;
+    $ctx->{fail}{$idx}++ if $exit_code;
+  };
+
+  my $ctx = {fail => {}, ttl => scalar(@repos), log => $log,};
+
+  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
+    ->command($process)->context($ctx)->on_finish($on_finish)
+    ->init->execute(@repos);
 
   print <<EOF;
 #-- DONE
-Total $ttl projects processed
+Total @{[ scalar @repos ]} projects processed
 EOF
 
-  my @fail = grep { !exists $done{$_} } @repos;
+  my @fail = map { $repos[$_] } keys %{$ctx->{fail}};
   print 'Total ', scalar @fail, ' projects are failed:', "\n";
   print join("\n", @fail), "\n";
 }
