@@ -1068,7 +1068,7 @@ sub do_report_log {
       $exit->(-1);
     }
 
-    my $data = parse_repo_log($repo, $path);
+    my $data = parse_repo_log($path, $repo);
     $exit->(0, $data);
   };
 
@@ -1120,7 +1120,7 @@ sub do_report_delta {
       $exit->(-1);
     }
 
-    my $data = parse_repo_delta($repo, $path, $this, $that, $base);
+    my $data = parse_repo_delta($path, $repo, $this, $that, $base);
     $exit->(0, $data);
   };
 
@@ -1161,8 +1161,8 @@ sub parse_repo_log {
       $d->{repo} = $repo;
       $log->info($d->{commit});
 
-      push @{$db->{id}}, $d->{commit};
-      $db->{data}{$d->{commit}} = $d;
+      push @{$db->{data}{id}}, $d->{commit};
+      $db->{data}{data}{$d->{commit}} = $d;
     }
   };
 
