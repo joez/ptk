@@ -39,6 +39,9 @@ sub execute {
     # child process here
     # your change in $context will not reflect in parent
     $self->command->($idx, $self->context, $job, $exit);
+
+    # child exit if not yet
+    exit;
   }
 
   return $fm->wait_all_children;
