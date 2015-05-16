@@ -81,7 +81,7 @@ COMMAND
       <src>:    relative Git repo paths
 
     $script report-manifest [-u <url>] [-m <manifest>] [-o <output>]
-    [-q <query>] [<src>...]
+    [-j <jobs>] [-q <query>] [<src>...]
       export manifest information into spreadsheet
       <query>:    same as in "dump-repo"
       <output>:   spreadsheet file path, default "manifest.xlsx"
@@ -210,7 +210,7 @@ EXAMPLES
       Git repos in "repo-list.txt" into "delta.xlsx", these commits
       need to be cherry-picked
 
-    11. $script format-patch -q BASE..HEAD repo-list.txt
+    11. $script format-patch -j 4 -q BASE..HEAD repo-list.txt
       format-patch from BASE to HEAD for each repo in repo-list.txt,
       save the patches into "./patch" folder
 
@@ -714,8 +714,9 @@ sub parse_commit_list {
 sub save_apply_patch_script {
   my $path = shift || 'apply-patch';
 
+  $log->info("generate script for applying patch: $path");
   if (-e $path) {
-    warn "file already exists, skip: $path";
+    $log->warn("file already exists, skip: $path");
   }
   else {
     my $dir = dirname($path);
@@ -795,10 +796,18 @@ sub do_format_patch {
   # save script first
   save_apply_patch_script(catfile($output, 'apply-patch')) if @repos;
 
-  my ($ttl, $cnt) = (scalar(@repos), 1);
-  for my $repo (@repos) {
+  my $process = sub {
+    my $idx  = shift;
+    my $ctx  = shift;
+    my $repo = shift;
+    my $exit = shift;
+
+    my $cnt = $idx + 1;
+    my $ttl = $ctx->{ttl};
+    my $log = $ctx->{log};
+    my $db  = $ctx->{db};
+
     $log->info("[$cnt / $ttl] processing: $repo");
-    $cnt++;
 
     # standard output sub-folder: exported
     my $source = catdir($root, $repo);
@@ -806,6 +815,7 @@ sub do_format_patch {
 
     unless (-e $source) {
       $log->warn("not exist, skip: $source");
+      $exit->(-1);
     }
     else {
       $log->info("output: $target");
@@ -829,13 +839,34 @@ sub do_format_patch {
         }
         else {
           $log->warn("not defined in commit list, skip: $source");
+          $exit->(-1);
         }
       }
       else {
         print "$_\n" for $r->run('format-patch', '-o', $target, '-q', $query);
       }
     }
-  }
+  };
+
+  my $on_finish = sub {
+    my ($idx, $ctx, $exit_code) = @_;
+    $ctx->{fail}{$idx}++ if $exit_code;
+  };
+
+  my $ctx = {db => $db, ttl => scalar(@repos), log => $log, fail => {},};
+
+  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
+    ->command($process)->context($ctx)->on_finish($on_finish)
+    ->init->execute(@repos);
+
+  print <<EOF;
+#-- DONE
+Total @{[ scalar @repos ]} projects processed
+EOF
+
+  my @fail = map { $repos[$_] } keys %{$ctx->{fail}};
+  print 'Total ', scalar @fail, ' projects are failed:', "\n";
+  print join("\n", @fail), "\n";
 }
 
 sub do_overlay_manifest {
