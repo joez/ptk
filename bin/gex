@@ -1529,7 +1529,9 @@ sub db_to_xls {
     @width = (40, 10, 10, 18, 30);
 
     $NEW_SHEET->();
-    my @repos = sort keys %{$db->{data}};
+
+    # only list non-empty ones
+    my @repos = sort grep { @{$db->{data}{$_}{id}} > 0 } keys %{$db->{data}};
     $worksheet->write_col($row, $col++, \@repos);
     $row = 1 + @repos;
     $NEW_TABLE->();
