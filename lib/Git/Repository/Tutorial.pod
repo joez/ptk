@@ -1,8 +1,8 @@
 # ABSTRACT: Control git from Perl using Git::Repository
 # PODNAME: Git::Repository::Tutorial
 
-
 __END__
+
 =pod
 
 =head1 NAME
@@ -11,7 +11,7 @@ Git::Repository::Tutorial - Control git from Perl using Git::Repository
 
 =head1 VERSION
 
-version 1.302
+version 1.313
 
 =head1 SYNOPSIS
 
@@ -71,19 +71,27 @@ Sometime, you'll need to create the Git repository from scratch:
     Git::Repository->run( init => $dir );
     $r = Git::Repository->new( work_tree => $dir );
 
-    # any older git requires the command to be run in the work tree,
-    # so we use the cwd option
+Any git older than 1.6.5 requires the command to be run in the work tree,
+so we use the C<cwd> option:
+
+    # git version 1.5.0.rc1 and above
     Git::Repository->run( init => { cwd => $dir } );
     $r = Git::Repository->new( work_tree => $dir );
 
-Note that the old C<create()> method is obsolete and has been removed.
+    # older git versions
+    Git::Repository->run( 'init-db' => { cwd => $dir } );
+    $r = Git::Repository->new( work_tree => $dir );
+
+Note that the old C<create()> method
+is obsolete (as of L<Git::Repository> 1.18, from April 16, 2011)
+and has been removed (as of L<Git::Repository> 1.301, January 21, 2013).
 
 =head2 Clone a repository
 
 Cloning works the same way:
 
     Git::Repository->run( clone => $url => $dir );
-    $r = Git::Repository->new( $dir );
+    $r = Git::Repository->new( work_tree => $dir );
 
 =head2 Run a simple command
 
@@ -95,6 +103,24 @@ it:
 
 In case of an error or warning, L<Git::Repository> will C<croak()> or
 C<carp()> appropriately.
+
+=head2 Properly quote options
+
+It's common to work out the proper string of Git commands needed to
+achieve your goal in the shell, before actually turning them into calls
+to C<< Git::Repository->run >>.
+
+Some options might require quoting, to properly get the arguments to
+Git through the shell:
+
+    # shell
+    $ git log --since='Fri Jul 26 19:34:15 2013 +0200' --grep='report ticket'
+
+Such quoting is of course not needed with L<Git::Repository>:
+
+    $since = 'Fri Jul 26 19:34:15 2013 +0200';
+    $grep  = 'report ticket';
+    my $cmd = $r->command( log => "--since=$since", "--grep=$grep" );
 
 =head2 Silence warnings for some Git commands
 
@@ -169,6 +195,108 @@ Use the C<env> option:
             },
         },
     );
+
+See L<Git::Repository::Command> for other available options.
+
+=head2 Ensure the output from Git commands is not localized
+
+Since version 1.7.9, Git translates its most common interface messages
+into the user's language if translations are available and the
+locale is appropriately set.
+
+This means that naively parsing the output "porcelain" commands might
+fail if the program is unexpectedly run under an unexpected locale.
+
+The easiest way to ensure your Git commands will be run in a "locale-safe"
+environment, is to set the C<LC_ALL> environment variable to C<C>.
+
+The brutal way:
+
+    $ENV{LC_ALL} = 'C';
+
+The temporary way:
+
+    local $ENV{LC_ALL} = 'C';
+
+The subtle way (restricted to the commands run on a given L<Git::Repository>
+instance):
+
+    my $r = Git::Repository->new( { env => { LC_ALL => 'C' } } );
+
+The stealthiest way (restricted to a single command):
+
+    $r->run( ..., { env => { LC_ALL => 'C' } } );
+
+=head2 Ensure the Git commands are run from the current working directory
+
+By default, L<Git::Repository::Command> will C<chdir()> to the root of
+the work tree before launching the requested Git command.
+
+This means that no matter where your program C<chdir()> to, commands on
+the L<Git::Repository> instance will by default be run from the root of
+the work tree. So, commands such as C<add> need to use the "full" path
+(relative to C<GIT_WORK_TREE>) of the files to be added.
+
+The C<cwd> option can be used to define where L<Git::Repository::Command> will
+C<chdir()> to. To instruct L<Git::Repository::Command> to B<not> C<chdir()>
+(and therefore run the Git command from the I<current working directory>),
+set the option to C<undef>:
+
+    # run from cwd for this command only
+    $r->run( ..., { cwd => undef } );
+
+    # always run git from cwd
+    my $r = Git::Repository->new( { cwd => undef } );
+
+=head2 Finely control when C<run()> dies
+
+By default, C<< Git::Repository->run( ... ) >> dies if the Git
+command exited with a status code of C<128> (fatal error)
+or C<129> (usage message).
+
+Some commands will throw an error and exit with a status different
+from the previous two:
+
+    $r->run( checkout => 'does-not-exist' );    # exit status: 1
+
+The above C<run()> call does not die, and output the following warning:
+
+    error: pathspec 'does-not-exist' did not match any file(s) known to git.
+
+The exit status (as given by C<<< $? >> 8 >>>) is C<1>.
+
+To force C<run()> to die when the Git command exits with status C<1>,
+use the C<fatal> option (added in version 1.304, May 25, 2013):
+
+    $r->run( checkout => 'does-not-exist', { fatal => 1 } );
+
+By default, C<128> and C<129> remain in the list of fatal codes.
+
+Here are a few examples:
+
+    # set the fatal codes for all call to run() on this object
+    $r = Git::Repository->new( { fatal => [ 1 .. 255 ] } );
+
+As usual, setting the option to the L<Git::Repository> object will set
+it for all commands run for it:
+
+    # "!0" is a shortcut for 1 .. 255
+    $r = Git::Repository->new( { fatal => [ "!0" ] } );
+
+Using negative codes will make these values non-fatal:
+
+    # the above call to new() makes all exit codes fatal
+    # but 3 and 7 won't be fatal for this specific run
+    $r->run( ..., { fatal => [ -3, -7 ] } );
+
+When the list contains a single item, there is no need to use an array
+reference:
+
+    # same as [ "!0" ]
+    $r = Git::Repository->new( { fatal => "!0" } );
+
+    # remove 17 from the list of fatal exit codes for this run only
+    $r->run( ..., { fatal => -17 } );
 
 See L<Git::Repository::Command> for other available options.
 
@@ -270,16 +398,27 @@ using the I<private> C<_version_gt()> method (which accepts two parameters):
 Have a look at L<Git::Repository::Plugin> and L<Git::Repository::Plugin::Log>,
 to learn how to add your own methods to L<Git::Repository>.
 
+=head1 BUGS
+
+Please report any bugs or feature requests on the bugtracker website
+http://rt.cpan.org/NoAuth/Bugs.html?Dist=Git-Repository or by email to
+bug-git-repository@rt.cpan.org.
+
+When submitting a bug or request, please include a test-file or a
+patch to an existing test-file that illustrates the bug or desired
+feature.
+
 =head1 AUTHOR
 
 Philippe Bruhat (BooK) <book@cpan.org>
 
-=head1 COPYRIGHT AND LICENSE
+=head1 COPYRIGHT
 
-This software is copyright (c) 2013 by Philippe Bruhat (BooK).
+Copyright 2010-2014 Philippe Bruhat (BooK), all rights reserved.
 
-This is free software; you can redistribute it and/or modify it under
-the same terms as the Perl 5 programming language system itself.
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
 
 =cut
-

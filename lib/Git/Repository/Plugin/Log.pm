@@ -1,8 +1,5 @@
 package Git::Repository::Plugin::Log;
-{
-  $Git::Repository::Plugin::Log::VERSION = '1.302';
-}
-
+$Git::Repository::Plugin::Log::VERSION = '1.312';
 use warnings;
 use strict;
 use 5.006;
@@ -46,7 +43,7 @@ Git::Repository::Plugin::Log - Add a log() method to Git::Repository
 
 =head1 VERSION
 
-version 1.302
+version 1.312
 
 =head1 SYNOPSIS
 
@@ -70,7 +67,13 @@ This module adds a new method to L<Git::Repository>.
 
 =head1 METHOD
 
-=head2 log( @args )
+=head2 log
+
+   # iterator
+   my $iter = $r->log( @args );
+
+   # all Git::Repository::Log objects obtained from the log
+   my @logs = $r->log( @args );
 
 Run C<git log> with the given arguments.
 
@@ -94,16 +97,28 @@ L<Git::Repository::Plugin>,
 L<Git::Repository::Log::Iterator>,
 L<Git::Repository::Log>.
 
+=head1 BUGS
+
+Please report any bugs or feature requests on the bugtracker website
+http://rt.cpan.org/NoAuth/Bugs.html?Dist=Git-Repository-Plugin-Log or by
+email to bug-git-repository-plugin-log@rt.cpan.org.
+
+When submitting a bug or request, please include a test-file or a
+patch to an existing test-file that illustrates the bug or desired
+feature.
+
 =head1 AUTHOR
 
 Philippe Bruhat (BooK) <book@cpan.org>
 
-=head1 COPYRIGHT AND LICENSE
+=head1 COPYRIGHT
 
-This software is copyright (c) 2013 by Philippe Bruhat (BooK).
+Copyright 2010-2013 Philippe Bruhat (BooK), all rights reserved.
 
-This is free software; you can redistribute it and/or modify it under
-the same terms as the Perl 5 programming language system itself.
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
 
 =cut
 

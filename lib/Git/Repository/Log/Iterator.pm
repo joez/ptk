@@ -1,8 +1,5 @@
 package Git::Repository::Log::Iterator;
-{
-  $Git::Repository::Log::Iterator::VERSION = '1.302';
-}
-
+$Git::Repository::Log::Iterator::VERSION = '1.312';
 use strict;
 use warnings;
 use 5.006;
@@ -35,12 +32,24 @@ sub new {
     @cmd = ( 'log', '--pretty=raw', @cmd );
 
     # run the command (@cmd may hold a Git::Repository instance)
-    bless { cmd => Git::Repository::Command->new(@cmd) }, $class;
+    my $cmd = Git::Repository::Command->new(@cmd);
+    bless { cmd => $cmd, fh => $cmd->stdout }, $class;
+}
+
+sub new_from_fh {
+    my ( $class, $fh ) = @_;
+    bless { fh => $fh }, $class;
+}
+
+sub new_from_file {
+    my ( $class, $file ) = @_;
+    open my $fh, '<', $file or die "Can't open $file: $!";
+    bless { fh => $fh }, $class;
 }
 
 sub next {
     my ($self) = @_;
-    my $fh = $self->{cmd}->stdout;
+    my $fh = $self->{fh};
 
     # get records
     my @records = defined $self->{record} ? ( delete $self->{record} ) : ();
@@ -53,18 +62,27 @@ sub next {
     }
 
     # EOF
-    return $self->{cmd}->final_output() if !@records;
+    if ( !@records ) {
+        if ( $self->{cmd} ) {    # might catch some git errors
+            $self->{cmd}->final_output();
+        }
+        else {                   # just close the filehandle
+            $self->{fh}->close;
+        }
+        return;
+    }
 
     # the first two records are always the same, with --pretty=raw
     local $/ = "\n";
     my ( $header, $message, $extra ) = ( @records, '', '' );
-    my %headers = map { chomp; split / /, $_, 2 } split /^(?=\S)/m, $header;
-    s/^ //gm for values %headers;
+    chomp $header;
+    my @headers = map { chomp; split / /, $_, 2 } split /^(?=\S)/m, $header;
+    s/\n /\n/g for @headers;
     chomp( $message, $extra ) if exists $self->{record};
 
     # create the log object
     return Git::Repository::Log->new(
-        %headers,
+        @headers,
         message => $message,
         extra   => $extra,
     );
@@ -84,7 +102,7 @@ Git::Repository::Log::Iterator - Split a git log stream into records
 
 =head1 VERSION
 
-version 1.302
+version 1.312
 
 =head1 SYNOPSIS
 
@@ -109,7 +127,9 @@ L<Git::Repository::Log> objects represening each log item.
 
 =head1 METHODS
 
-=head2 new( @args )
+=head2 new
+
+    my $iter = Git::Repository::Log::Iterator->new( @args );
 
 Create a new B<git log> stream from the parameter list in C<@args>
 and return a iterator on it.
@@ -127,21 +147,65 @@ When unsupported options are recognized in the parameter list, C<new()>
 will C<croak()> with a message advising to use C<< run( 'log' => ... ) >>
 to parse the output yourself.
 
-=head2 next()
+The object is really a blessed hash reference, with only two keys:
+
+=over 4
+
+=item cmd
+
+The L<Git::Repository::Command> object running the actual B<git log>
+command. It might not be defined in some cases (see below L</new_from_fh>
+and L</new_from_file>).
+
+=item fh
+
+The filehandle from which the output of B<git log> is actually read.
+This is the only attribute needed to run the L</next> method.
+
+=back
+
+=head2 new_from_fh
+
+This constructor makes it possible to provide the filehandle directly.
+
+The C<cmd> key is not defined when using this constructor.
+
+=head2 new_from_file
+
+This constructor makes it possible to provide a filename that will be
+C<open()>ed to produce a filehandle to read the log stream from.
+
+The C<cmd> key is not defined when using this constructor.
+
+=head2 next
+
+    my $log = $iter->next;
 
 Return the next log item as a L<Git::Repository::Log> object,
 or nothing if the stream has ended.
+
+=head1 BUGS
+
+Please report any bugs or feature requests on the bugtracker website
+http://rt.cpan.org/NoAuth/Bugs.html?Dist=Git-Repository-Plugin-Log or by
+email to bug-git-repository-plugin-log@rt.cpan.org.
+
+When submitting a bug or request, please include a test-file or a
+patch to an existing test-file that illustrates the bug or desired
+feature.
 
 =head1 AUTHOR
 
 Philippe Bruhat (BooK) <book@cpan.org>
 
-=head1 COPYRIGHT AND LICENSE
+=head1 COPYRIGHT
 
-This software is copyright (c) 2013 by Philippe Bruhat (BooK).
+Copyright 2010-2013 Philippe Bruhat (BooK), all rights reserved.
 
-This is free software; you can redistribute it and/or modify it under
-the same terms as the Perl 5 programming language system itself.
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
 
 =cut
 

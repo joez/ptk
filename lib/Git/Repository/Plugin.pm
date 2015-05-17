@@ -1,8 +1,5 @@
 package Git::Repository::Plugin;
-{
-  $Git::Repository::Plugin::VERSION = '1.302';
-}
-
+$Git::Repository::Plugin::VERSION = '1.313';
 use strict;
 use warnings;
 use 5.006;
@@ -11,12 +8,16 @@ use Carp;
 sub install {
     my ( $class, @keywords ) = @_;
     no strict 'refs';
+
+    # get the list of keywords to install
     my %keyword = map { $_ => 1 } my @all_keywords = $class->_keywords;
     @keywords = @all_keywords if !@keywords;
     @keywords = grep {
         !( !exists $keyword{$_} and carp "Unknown keyword '$_' in $class" )
     } @keywords;
     carp "No keywords installed from $class" if !@keywords;
+
+    # install keywords
     *{"Git::Repository::$_"} = \&{"$class\::$_"} for @keywords;
 }
 
@@ -31,8 +32,8 @@ sub _keywords {
 
 # ABSTRACT: Base class for Git::Repository plugins
 
-
 __END__
+
 =pod
 
 =head1 NAME
@@ -41,7 +42,7 @@ Git::Repository::Plugin - Base class for Git::Repository plugins
 
 =head1 VERSION
 
-version 1.302
+version 1.313
 
 =head1 SYNOPSIS
 
@@ -72,7 +73,9 @@ with all the methods they provide, or only a selection of them.
 
 L<Git::Repository::Plugin> provides a single method:
 
-=head2 install( @keywords )
+=head2 install
+
+    $plugin->install( @keywords );
 
 Install all keywords provided in the L<Git::Repository> namespace.
 
@@ -80,12 +83,24 @@ If called with an empty list, will install all available keywords.
 
 =head1 SUBCLASSING
 
-When creating a plugin, the new keywords that are added by the plugin
-to L<Git::Repository> must be returned by a C<_keywords()> method.
+=head2 Adding methods to L<Git::Repository>
+
+When creating a plugin, the new keywords (i.e. methods) that are added
+by the plugin to L<Git::Repository> must be returned by a C<_keywords()>
+method.
+
+=head2 Adding attributes to L<Git::Repository>
+
+L<Git::Repository> is a blessed hash reference.
+
+If extra attributes are needed, the recommended name for the hash key (to
+avoid name clashes between plugins) is C<_plugin_I<name>_I<attribute>>,
+where I<name> is the plugin lowercase name, and I<attribute> is the
+attribute name.
 
 =head1 ACKNOWLEDGEMENTS
 
-Thanks to Todd Rinalo, who wanted to add more methods to
+Thanks to Todd Rinaldo, who wanted to add more methods to
 L<Git::Repository>, which made me look for a solution that would preserve
 the minimalism of L<Git::Repository>.
 
@@ -97,16 +112,27 @@ team.
 
 Further improvements to the plugin system proposed by Aristotle Pagaltzis.
 
+=head1 BUGS
+
+Please report any bugs or feature requests on the bugtracker website
+http://rt.cpan.org/NoAuth/Bugs.html?Dist=Git-Repository or by email to
+bug-git-repository@rt.cpan.org.
+
+When submitting a bug or request, please include a test-file or a
+patch to an existing test-file that illustrates the bug or desired
+feature.
+
 =head1 AUTHOR
 
 Philippe Bruhat (BooK) <book@cpan.org>
 
-=head1 COPYRIGHT AND LICENSE
+=head1 COPYRIGHT
 
-This software is copyright (c) 2013 by Philippe Bruhat (BooK).
+Copyright 2010-2014 Philippe Bruhat (BooK), all rights reserved.
 
-This is free software; you can redistribute it and/or modify it under
-the same terms as the Perl 5 programming language system itself.
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
 
 =cut
-

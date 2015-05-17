@@ -1,8 +1,5 @@
 package Git::Repository;
-{
-  $Git::Repository::VERSION = '1.302';
-}
-
+$Git::Repository::VERSION = '1.313';
 use warnings;
 use strict;
 use 5.006;
@@ -74,8 +71,9 @@ sub new {
         $options = $self->{options} = shift @o || {};
     }
 
-    # ignore 'input' option during object creation
+    # ignore 'input' and 'fatal' options during object creation
     my $input = delete $options->{input};
+    my $fatal = delete $options->{fatal};
 
     # die if deprecated parameters are given
     croak "repository is obsolete, please use git_dir instead"
@@ -159,6 +157,7 @@ sub new {
 
     # put back the ignored option
     $options->{input} = $input if defined $input;
+    $options->{fatal} = $fatal if defined $fatal;
 
     return $self;
 }
@@ -184,16 +183,17 @@ sub run {
     my ( $self, @cmd ) = @_;
 
     # split the args to get the optional callbacks
-    my @c;
-    @cmd = grep { ref eq 'CODE' ? !push @c, $_ : 1 } @cmd;
+    my @cb;
+    @cmd = grep { ref eq 'CODE' ? !push @cb, $_ : 1 } @cmd;
+
+    local $Carp::CarpLevel = 1;
 
     # run the command (pass the instance if called as an instance method)
     my $command
         = Git::Repository::Command->new( ref $self ? $self : (), @cmd );
 
     # return the output or die
-    local $Carp::CarpLevel = 1;
-    return $command->final_output(@c);
+    return $command->final_output(@cb);
 }
 
 #
@@ -286,8 +286,8 @@ sub version_ge {
 
 # ABSTRACT: Perl interface to Git repositories
 
-
 __END__
+
 =pod
 
 =head1 NAME
@@ -296,7 +296,7 @@ Git::Repository - Perl interface to Git repositories
 
 =head1 VERSION
 
-version 1.302
+version 1.313
 
 =head1 SYNOPSIS
 
@@ -319,12 +319,16 @@ version 1.302
     Git::Repository->run( clone => $url, $dir, ... );
     $r = Git::Repository->new( work_tree => $dir );
 
-    # run commands
-    # - get the full output (no errput)
-    $output = $r->run(@cmd);
+    # provide an option hash for Git::Repository::Command
+    # (see Git::Repository::Command for all available options)
+    $r = Git::Repository->new( ..., \%options );
 
-    # - get the full output as a list of lines (no errput)
-    @output = $r->run(@cmd);
+    # run commands
+    # - get the full output (no errput) passing options for this command only
+    $output = $r->run( @cmd, \%options );
+
+    # - get the full output as a list of lines (no errput), with options
+    @output = $r->run( @cmd, \%options );
 
     # - process the output with callbacks
     $output = $r->run( @cmd, sub {...} );
@@ -332,7 +336,7 @@ version 1.302
 
     # - obtain a Git::Repository::Command object
     #   (see Git::Repository::Command for details)
-    $cmd = $r->command(@cmd);
+    $cmd = $r->command( @cmd, \%options );
 
     # obtain version information
     my $version = $r->version();
@@ -371,7 +375,9 @@ See L<Git::Repository::Tutorial> for more code examples.
 
 =head1 CONSTRUCTOR
 
-=head2 new( %args, $options )
+=head2 new
+
+    Git::Repository->new( %args, $options );
 
 Create a new L<Git::Repository> object, based on an existing Git repository.
 
@@ -409,20 +415,26 @@ corresponding L<Git::Repository> instance.
 
 So this:
 
-    my $options = {
-        git => '/path/to/some/other/git',
-        env => {
-            GIT_COMMITTER_EMAIL => 'book@cpan.org',
-            GIT_COMMITTER_NAME  => 'Philippe Bruhat (BooK)',
-        },
-    };
     my $r = Git::Repository->new(
+        # parameters
         work_tree => $dir,
-        $options
+        # options
+        {   git => '/path/to/some/other/git',
+            env => {
+                GIT_COMMITTER_EMAIL => 'book@cpan.org',
+                GIT_COMMITTER_NAME  => 'Philippe Bruhat (BooK)',
+            },
+        }
     );
 
 is equivalent to explicitly passing the option hash to each
-C<run()> or C<command()>.
+C<run()> or C<command()> call.
+The documentation for L<Git::Repository::Command> lists all
+available options.
+
+Note that Git::Repository and L<Git::Repository::Command> take
+great care in finding the option hash wherever it may be in C<@_>,
+and to merge multiple option hashes if more than one is provided.
 
 It probably makes no sense to set the C<input> option in C<new()>,
 but L<Git::Repository> won't stop you.
@@ -443,9 +455,16 @@ pointing to it, simply do it in two steps:
 
 =head1 METHODS
 
+=for Pod::Coverage     create
+    repo_path
+    wc_path
+
 L<Git::Repository> supports the following methods:
 
-=head2 command( @cmd )
+=head2 command
+
+    Git::Repository->command( @cmd );
+    $r->command( @cmd );
 
 Runs the git sub-command and options, and returns a L<Git::Repository::Command>
 object pointing to the sub-process running the command.
@@ -453,7 +472,10 @@ object pointing to the sub-process running the command.
 As described in the L<Git::Repository::Command> documentation, C<@cmd>
 may also contain a hashref containing options for the command.
 
-=head2 run( @cmd )
+=head2 run
+
+    Git::Repository->run( @cmd );
+    $r->run( @cmd );
 
 Runs the command and returns the output as a string in scalar context,
 or as a list of lines in list context. Also accepts a hashref of options.
@@ -466,23 +488,28 @@ successively to each line of output. The line being processed is in C<$_>,
 but the coderef must still return the result string (like C<map>).
 
 If the git command printed anything on stderr, it will be printed as
-warnings. If the git sub-process exited with status C<128> (fatal error),
-or C<129> (usage message), C<run()> will C<die()>.
+warnings. For convenience, if the git sub-process exited with status
+C<128> (fatal error), or C<129> (usage message), C<run()> will C<die()>.
+The exit status values for which C<run()> dies can be modified using
+the C<fatal> option (see L<Git::Repository::Command> for details).
 
-=head2 git_dir()
+The exit status of the command that was just run is accessible as usual
+using C<<< $? >> 8 >>>. See L<perlvar> for details about C<$?>.
+
+=head2 git_dir
 
 Returns the repository path.
 
-=head2 work_tree()
+=head2 work_tree
 
 Returns the working copy path.
 Used as current working directory by L<Git::Repository::Command>.
 
-=head2 options()
+=head2 options
 
 Return the option hash that was passed to C<< Git::Repository->new() >>.
 
-=head2 version()
+=head2 version
 
 Return the version of git, as given by C<git --version>.
 
@@ -581,12 +608,12 @@ See L<Git::Repository::Plugin> about how to create a new plugin.
 
 =head1 ACKNOWLEDGEMENTS
 
-Thanks to Todd Rinalo, who wanted to add more methods to
+Thanks to Todd Rinaldo, who wanted to add more methods to
 L<Git::Repository>, which made me look for a solution that would preserve
 the minimalism of L<Git::Repository>. The C<::Plugin> interface is what
 I came up with.
 
-=head1 OTHER PERL GIT WRAPPERS
+=head1 OTHER PERL GIT WRAPPERS (a.k.a. SEE ALSO)
 
 (This section was written in June 2010. The other Git wrappers have
 probably evolved since that time.)
@@ -608,25 +635,28 @@ Even though it works well for me and others, L<Git::Repository> has its
 own shortcomings: it I<is> a I<low-level interface to Git commands>,
 anything complex requires you to deal with input/output handles,
 it provides no high-level interface to generate actual Git commands
-or process the output of commands (but have a look at the plugins),
-it doesn't fully work under Win32 yet, etc. One the following modules
-may therefore be better suited for your needs, depending on what you're
-trying to achieve.
+or process the output of commands (but have a look at the plugins), etc.
+One the following modules may therefore be better suited for your needs,
+depending on what you're trying to achieve.
 
 =head2 Git.pm
 
-Git.pm is not on CPAN. It is usually packaged with Git, and installed with
-the system Perl libraries. Not being on CPAN makes it harder to install
-in any Perl. It makes it harder for a CPAN library to depend on it.
+Git.pm was not on CPAN in 2010. It is packaged with Git, and installed
+with the system Perl libraries. Not being on CPAN made it harder to
+install in any Perl. It made it harder for a CPAN library to depend on it.
 
 It doesn't allow calling C<git init> or C<git clone>.
 
 The C<command_bidi_pipe> function especially has problems:
 L<http://kerneltrap.org/mailarchive/git/2008/10/24/3789584>
 
+The L<Git> module from git.git was packaged as a CPAN distribution by
+MSOUTH in June 2013.
+
 =head2 Git::Class
 
-Depends on Moose, which seems an unnecessary dependency for a simple
+L<Git::Class>
+depends on Moose, which seems an unnecessary dependency for a simple
 wrapper around Git. The startup penalty could become significant for
 command-line tools.
 
@@ -637,15 +667,36 @@ porcelain commands, and provides no way to control bidirectional commands
 
 =head2 Git::Wrapper
 
-Doesn't support streams or bidirectional commands.
+L<Git::Wrapper>
+doesn't support streams or bidirectional commands.
+
+=head2 Git::Sub
+
+(This description was added for completeness in May 2013.)
+
+L<Git::Sub> appeared in 2013, as a set of Git-specific L<System::Sub>
+functions. It provide a nice set of C<git::> functions, and has some
+limitations (due to the way L<System::Sub> itself works) which don't
+impact most Git commands.
+
+L<Git::Sub> doesn't support working with streams.
+
+=head2 Git::Raw
+
+(This description was added for completeness in September 2014,
+upon request of the author of L<Git::Raw>.)
+
+L<Git::Raw>
+provides bindings to L<libgit2|http://libgit2.github.com/>, a pure C
+implementation of the Git core methods. Most of the functions provided by
+libgit2 are available. If you have complex workflows, or even if speed is of
+the essence, this may be a more attractive solution than shelling out to git.
 
 =head1 BUGS
 
 Since version 1.17, L<Git::Repository> delegates the actual command
-execution to L<System::Command>. Win32 support for that module is
-currently very bad (the test suite hangs in a few places).
-If you'd like better Win32 support for L<Git::Repository>, help me improve
-L<System::Command>!
+execution to L<System::Command>, which has better support for Win32
+since version 1.100.
 
 Please report any bugs or feature requests to C<bug-git-repository at rt.cpan.org>, or through
 the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Git-Repository>.  I will be notified, and then you'll
@@ -679,16 +730,27 @@ L<http://search.cpan.org/dist/Git-Repository>
 
 =back
 
+=head1 BUGS
+
+Please report any bugs or feature requests on the bugtracker website
+http://rt.cpan.org/NoAuth/Bugs.html?Dist=Git-Repository or by email to
+bug-git-repository@rt.cpan.org.
+
+When submitting a bug or request, please include a test-file or a
+patch to an existing test-file that illustrates the bug or desired
+feature.
+
 =head1 AUTHOR
 
 Philippe Bruhat (BooK) <book@cpan.org>
 
-=head1 COPYRIGHT AND LICENSE
+=head1 COPYRIGHT
 
-This software is copyright (c) 2013 by Philippe Bruhat (BooK).
+Copyright 2010-2014 Philippe Bruhat (BooK), all rights reserved.
 
-This is free software; you can redistribute it and/or modify it under
-the same terms as the Perl 5 programming language system itself.
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
 
 =cut
-

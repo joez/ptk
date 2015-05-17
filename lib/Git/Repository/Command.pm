@@ -1,8 +1,5 @@
 package Git::Repository::Command;
-{
-  $Git::Repository::Command::VERSION = '1.302';
-}
-
+$Git::Repository::Command::VERSION = '1.313';
 use strict;
 use warnings;
 use 5.006;
@@ -80,9 +77,9 @@ sub _is_git {
         if !( defined $git && -x $git );
 
     # try to run it
-    my ( $pid, $in, $out, $err )
-        = System::Command->spawn( $git, @args, '--version' );
-    my $version = do { local $/ = "\n"; <$out>; };
+    my $cmd = System::Command->new( $git, @args, '--version' );
+    my $version = do { local $/ = "\n"; $cmd->stdout->getline; } || '';
+    $cmd->close;
 
     # does it really look like git?
     return $binary{$type}{$key}{$binary}{$args}
@@ -128,6 +125,17 @@ sub new {
             if defined $work_tree;
     }
 
+    # extract and process the 'fatal' option
+    push @o, {
+        fatal => {
+            128 => 1,    # fatal
+            129 => 1,    # usage
+            map s/^-// ? ( $_ => '' ) : ( $_ => 1 ),
+            map /^!0$/ ? ( 1 .. 255 ) : $_,
+            map ref() ? @$_ : $_, grep defined, map $_->{fatal}, @o
+        }
+    };
+
     # get and check the git command
     my $git_cmd = ( map { exists $_->{git} ? $_->{git} : () } @o )[-1];
 
@@ -163,9 +171,8 @@ sub final_output {
     # done with it
     $self->close;
 
-    # exit codes: 128 => fatal, 129 => usage
-    my $exit = $self->{exit};
-    if ( $exit == 128 || $exit == 129 ) {
+    # fatal exit codes set by the 'fatal' option
+    if ( $self->options->{fatal}{ $self->exit } ) {
         croak join( "\n", @errput ) || 'fatal: unknown git error';
     }
 
@@ -185,8 +192,8 @@ sub final_output {
 
 # ABSTRACT: Command objects for running git
 
-
 __END__
+
 =pod
 
 =head1 NAME
@@ -195,7 +202,7 @@ Git::Repository::Command - Command objects for running git
 
 =head1 VERSION
 
-version 1.302
+version 1.313
 
 =head1 SYNOPSIS
 
@@ -241,7 +248,9 @@ through L<Git::Repository>.
 As a subclass of L<System::Command>,
 L<Git::Repository::Command> supports the following methods:
 
-=head2 new( @cmd )
+=head2 new
+
+    Git::Repository::Command->new( @cmd );
 
 Runs a B<git> command with the parameters in C<@cmd>.
 
@@ -266,10 +275,31 @@ should be an array reference with the command and parameters, like this:
 =item C<cwd>
 
 The I<current working directory> in which the git command will be run.
+(C<chdir()> will be called just before lauching the command.)
+
+If not provided, it will default to the root of the Git repository work
+tree (if the repository is bare, then no C<chdir()> will be performed).
 
 =item C<env>
 
 A hashref containing key / values to add to the git command environment.
+
+=item C<fatal>
+
+An arrayref containing a list of exit codes that will be considered
+fatal by C<final_output()>.
+
+Prepending the value with C<-> will make it non-fatal, which can be
+useful to override a default. The string C<"!0"> can be used as a
+shortcut for C<[ 1 .. 255 ]>.
+
+If several option hashes have the C<fatal> key, the lists of exit codes
+will be combined, with the values provided last taking precedence (when
+using a combination of positive / negative values).
+
+The generated list always contains C<128> and C<129>; to make them
+non-fatal, just add C<-128> and C<-129> to the list provided to the
+C<fatal> option.
 
 =item C<input>
 
@@ -305,12 +335,16 @@ keys in later hashes taking precedence over keys in earlier hashes.
 The L<Git::Repository::Command> object returned by C<new()> has a
 number of attributes defined (see below).
 
-=head2 close()
+=head2 close
+
+    $cmd->close();
 
 Close all pipes to the child process, and collects exit status, etc.
 and defines a number of attributes (see below).
 
-=head2 final_output( @callbacks )
+=head2 final_output
+
+    $cmd->final_output( @callbacks );
 
 Collect all the output, and terminate the command.
 
@@ -324,8 +358,9 @@ successively to each line of output. The line being processed is in C<$_>,
 but the coderef must still return the result string.
 
 If the Git command printed anything on stderr, it will be printed as
-warnings. If the git sub-process exited with status C<128> (fatal error),
-or C<129> (usage message), it will C<die()>.
+warnings. If the git sub-process exited with a status code listed in
+the C<fatal> option, it will C<die()>. The defaults fatal exit codes
+are C<128> (fatal error), and C<129> (usage message).
 
 =head2 Accessors
 
@@ -336,23 +371,23 @@ The object returned by C<new()> will have the following attributes defined:
 
 =over 4
 
-=item cmdline()
+=item cmdline
 
 Return the command-line actually executed, as a list of strings.
 
-=item pid()
+=item pid
 
 The PID of the underlying B<git> command.
 
-=item stdin()
+=item stdin
 
 A filehandle opened in write mode to the child process' standard input.
 
-=item stdout()
+=item stdout
 
 A filehandle opened in read mode to the child process' standard output.
 
-=item stderr()
+=item stderr
 
 A filehandle opened in read mode to the child process' standard error output.
 
@@ -365,22 +400,20 @@ following code:
 
 C<$fh> is opened and points to the output of the git subcommand, while
 the anonymous L<Git::Repository::Command> object has been destroyed.
-Once C<$fh> is destroyed, the subprocess will be reaped, thus avoiding
-zombies.
 
 After the call to C<close()>, the following attributes will be defined:
 
 =over 4
 
-=item exit()
+=item exit
 
 The exit status of the underlying B<git> command.
 
-=item core()
+=item core
 
 A boolean value indicating if the command dumped core.
 
-=item signal()
+=item signal
 
 The signal, if any, that killed the command.
 
@@ -399,16 +432,32 @@ Many thanks go also to Chris Williams (BINGOS) for pointing me towards
 perlmonks posts by ikegami that contained crucial elements to a working
 MSWin32 implementation.
 
+In the end, it was Christian Walder (MITHALDU) who helped me finalize
+Win32 support for L<System::Command> through a quick round of edit
+(on my Linux box) and testing (on his Windows box) during the Perl QA
+Hackathon 2013 in Lancaster.
+
+=head1 BUGS
+
+Please report any bugs or feature requests on the bugtracker website
+http://rt.cpan.org/NoAuth/Bugs.html?Dist=Git-Repository or by email to
+bug-git-repository@rt.cpan.org.
+
+When submitting a bug or request, please include a test-file or a
+patch to an existing test-file that illustrates the bug or desired
+feature.
+
 =head1 AUTHOR
 
 Philippe Bruhat (BooK) <book@cpan.org>
 
-=head1 COPYRIGHT AND LICENSE
+=head1 COPYRIGHT
 
-This software is copyright (c) 2013 by Philippe Bruhat (BooK).
+Copyright 2010-2014 Philippe Bruhat (BooK), all rights reserved.
 
-This is free software; you can redistribute it and/or modify it under
-the same terms as the Perl 5 programming language system itself.
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
 
 =cut
-

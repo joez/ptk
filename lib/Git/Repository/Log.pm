@@ -1,8 +1,5 @@
 package Git::Repository::Log;
-{
-  $Git::Repository::Log::VERSION = '1.302';
-}
-
+$Git::Repository::Log::VERSION = '1.312';
 use strict;
 use warnings;
 use 5.006;
@@ -16,7 +13,7 @@ for my $attr (
     author_localtime author_tz author_gmtime
     committer_localtime committer_tz committer_gmtime
     raw_message message subject body
-    gpgsig mergetag
+    gpgsig
     extra
     )
     )
@@ -24,9 +21,9 @@ for my $attr (
     no strict 'refs';
     *$attr = sub { return $_[0]{$attr} };
 }
-for my $attr (qw( parent )) {
+for my $attr (qw( parent mergetag )) {
     no strict 'refs';
-    *$attr = sub { return @{ $_[0]{$attr} } };
+    *$attr = sub { return @{ $_[0]{$attr} || [] } };
 }
 
 sub new {
@@ -35,7 +32,7 @@ sub new {
 
     # pick up key/values from the list
     while ( my ( $key, $value ) = splice @args, 0, 2 ) {
-        if ( $key eq 'parent' ) {
+        if ( $key =~ /^(?:parent|mergetag)$/ ) {
             push @{ $self->{$key} }, $value;
         }
         else {
@@ -55,7 +52,7 @@ sub new {
 
     # author and committer details
     for my $who (qw( author committer )) {
-        $self->{$who} =~ /(.*) <(.*)> (.*) (([-+])(..)(..))/;
+        $self->{$who} =~ /^(.*) <(.*)> (.*) (([-+])(..)(..))$/;
         my @keys = ( "${who}_name", "${who}_email", "${who}_gmtime",
             "${who}_tz" );
         @{$self}{@keys} = ( $1, $2, $3, $4 );
@@ -80,7 +77,7 @@ Git::Repository::Log - Class representing git log data
 
 =head1 VERSION
 
-version 1.302
+version 1.312
 
 =head1 SYNOPSIS
 
@@ -95,7 +92,7 @@ version 1.302
 
 =head1 DESCRIPTION
 
-L<Git::Repository::Log> is a class whose instances reprensent
+L<Git::Repository::Log> is a class whose instances represent
 log items from a B<git log> stream.
 
 =head1 CONSTRUCTOR
@@ -103,7 +100,7 @@ log items from a B<git log> stream.
 This method shouldn't be used directly. L<Git::Repository::Log::Iterator>
 should be the preferred way to create L<Git::Repository::Log> objects.
 
-=head2 new( @args )
+=head2 new
 
 Create a new L<Git::Repository::Log> instance, using the list of key/values
 passed as parameters. The supported keys are (from the output of
@@ -244,16 +241,28 @@ The unindented version of the log message.
 
 =back
 
+=head1 BUGS
+
+Please report any bugs or feature requests on the bugtracker website
+http://rt.cpan.org/NoAuth/Bugs.html?Dist=Git-Repository-Plugin-Log or by
+email to bug-git-repository-plugin-log@rt.cpan.org.
+
+When submitting a bug or request, please include a test-file or a
+patch to an existing test-file that illustrates the bug or desired
+feature.
+
 =head1 AUTHOR
 
 Philippe Bruhat (BooK) <book@cpan.org>
 
-=head1 COPYRIGHT AND LICENSE
+=head1 COPYRIGHT
 
-This software is copyright (c) 2013 by Philippe Bruhat (BooK).
+Copyright 2010-2013 Philippe Bruhat (BooK), all rights reserved.
 
-This is free software; you can redistribute it and/or modify it under
-the same terms as the Perl 5 programming language system itself.
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
 
 =cut
 
