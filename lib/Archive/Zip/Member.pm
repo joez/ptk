@@ -6,7 +6,7 @@ use strict;
 use vars qw( $VERSION @ISA );
 
 BEGIN {
-    $VERSION = '1.39';
+    $VERSION = '1.46';
     @ISA     = qw( Archive::Zip );
 
     if ($^O eq 'MSWin32') {
@@ -196,8 +196,8 @@ sub desiredCompressionMethod {
         $self->{'desiredCompressionMethod'} = $newDesiredCompressionMethod;
         if ($newDesiredCompressionMethod == COMPRESSION_STORED) {
             $self->{'desiredCompressionLevel'} = 0;
-            $self->{'bitFlag'} &= ~GPBF_HAS_DATA_DESCRIPTOR_MASK;
-
+            $self->{'bitFlag'} &= ~GPBF_HAS_DATA_DESCRIPTOR_MASK
+                if $self->uncompressedSize() == 0;
         } elsif ($oldDesiredCompressionMethod == COMPRESSION_STORED) {
             $self->{'desiredCompressionLevel'} = COMPRESSION_LEVEL_DEFAULT;
         }
@@ -496,11 +496,7 @@ sub extractToFileNamed {
         if ($^O eq 'MSWin32' && $Archive::Zip::UNICODE) {
             $name = decode_utf8(Win32::GetFullPathName($name));
             mkpath_win32($name);
-            if ($self->{'compressedSize'} == 0) {
-                return;
-            } else {
-                Win32::CreateFile($name);
-            }
+            Win32::CreateFile($name);
             ($status, $fh) = _newFileHandle(Win32::GetANSIPathName($name), 'w');
         } else {
             mkpath(dirname($name));    # croaks on error
@@ -678,10 +674,16 @@ sub head {
       $self->versionNeededToExtract(),
       $self->{'bitFlag'},
       $self->desiredCompressionMethod(),
-      $self->lastModFileDateTime(), $self->crc32(), $mode
-      ? $self->_writeOffset()       # compressed size
-      : $self->compressedSize(),    # may need to be re-written later
-      $self->uncompressedSize(),
+      $self->lastModFileDateTime(), 
+      $self->hasDataDescriptor() 
+        ? (0,0,0) # crc, compr & uncompr all zero if data descriptor present
+        : (
+            $self->crc32(), 
+            $mode
+              ? $self->_writeOffset()       # compressed size
+              : $self->compressedSize(),    # may need to be re-written later
+            $self->uncompressedSize(),
+          ),
       length($self->fileName()),
       length($self->localExtraField());
 }
@@ -698,7 +700,7 @@ sub _writeLocalFileHeader {
     $self->_print($fh, $signatureData)
       or return _ioError("writing local header signature");
 
-    my $header = $self->head(0);
+    my $header = $self->head(1);
 
     $self->_print($fh, $header) or return _ioError("writing local header");
 
@@ -1046,12 +1048,6 @@ sub _writeToFileHandle {
           and ($self->compressionMethod() == COMPRESSION_STORED
             or $self->desiredCompressionMethod() == COMPRESSION_DEFLATED));
 
-    # Set both compressedSize and uncompressedSize to 0 if either of them is 0
-    if ($self->uncompressedSize == 0 || $self->uncompressedSize == 0) {
-        $self->{'compressedSize'}   = 0;
-        $self->{'uncompressedSize'} = 0;
-    }
-
     my $shouldWriteDataDescriptor =
       ($headerFieldsUnknown and not $fhIsSeekable);
 
@@ -1090,7 +1086,6 @@ sub _writeData {
         my ($outRef, $status) = $self->readChunk($chunkSize);
         symlink $$outRef, $self->{'newName'};
     } else {
-        return AZ_OK if ($self->uncompressedSize() == 0);
         my $status;
         my $chunkSize = $Archive::Zip::ChunkSize;
         while ($self->_readDataRemaining() > 0) {
@@ -1105,7 +1100,6 @@ sub _writeData {
 
             last if $status == AZ_STREAM_END;
         }
-        $self->{'compressedSize'} = $self->_writeOffset();
     }
     return AZ_OK;
 }
