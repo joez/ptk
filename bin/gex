@@ -742,10 +742,9 @@ my $root = shift || catdir($self, 'exported');
 my $work = shift || '.';
 my $back = shift || catdir($self, 'imported');
 
-print qq/apply patches from "$root" to "$work", move to "$back" if success/;
+print qq/# apply patches from "$root" to "$work", move to "$back" if success\n/;
 
 my %todo;
-my @fail;
 
 my $wanted = sub { push @{$todo{$File::Find::dir}}, $_ if /\.patch$/ };
 find({wanted => $wanted, preprocess => sub {grep { !/^\./ } @_}}, $root);
@@ -754,22 +753,25 @@ local $\ = "\n";
 for my $p (sort keys %todo) {
   my $d = abs2rel($p, $root);
   my $repo = catdir($work, $d);
-  next unless -e $repo;
+  die "fail to access: $repo\n" unless -e $repo;
 
   for my $f (sort @{$todo{$p}}) {
     my $patch = catfile($p, $f);
-	print "\n# $patch";
 
-    if (system(qw/git -C/, $repo, qw/am -k -3/, rel2abs($patch)) == 0) {
+    print "\n# applying patch: $patch";
+
+    if (system("cd $repo && git am -k -3 --whitespace=nowarn " . rel2abs($patch)) == 0) {
       my $d = catdir($back, $d);
       make_path($d) unless -e $d;
-      move($patch, catfile($d, $f)) or die;
+      move($patch, catfile($d, $f)) or die "fail to move $patch to $d\n";
     }
-	else {
-	  push @fail, $patch;
-	}
+    else {
+      die "fail to apply patch: $patch\n"
+    }
   }
 }
+
+print "\n# done";
 EOF
 
     close $fh;
@@ -833,7 +835,7 @@ sub do_format_patch {
           for my $id (@{$db->{$repo}{id}}) {
             $log->info('processing: ' . $db->{$repo}{data}{$id});
             print "$_\n"
-              for $r->run('format-patch', '-o', $target, '--start-number',
+              for $r->run('format-patch', '-o', $target, '-k', '--start-number',
               $i++, '-1', $id);
           }
         }
@@ -843,7 +845,7 @@ sub do_format_patch {
         }
       }
       else {
-        print "$_\n" for $r->run('format-patch', '-o', $target, '-q', $query);
+        print "$_\n" for $r->run('format-patch', '-o', $target, '-k', $query);
       }
     }
   };
