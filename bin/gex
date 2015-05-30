@@ -653,9 +653,13 @@ sub do_forall {
 
   my $ctx = {fail => {}, ttl => scalar(@repos), log => $log,};
 
-  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
-    ->command($process)->context($ctx)->on_finish($on_finish)
-    ->init->execute(@repos);
+  Ptk::Base::Executor->new(
+    log       => $log,
+    workers   => $opt{jobs},
+    command   => $process,
+    context   => $ctx,
+    on_finish => $on_finish,
+  )->execute(@repos);
 
   print <<EOF;
 #-- DONE
@@ -835,8 +839,8 @@ sub do_format_patch {
           for my $id (@{$db->{$repo}{id}}) {
             $log->info('processing: ' . $db->{$repo}{data}{$id});
             print "$_\n"
-              for $r->run('format-patch', '-o', $target, '-k', '--start-number',
-              $i++, '-1', $id);
+              for $r->run('format-patch', '-o', $target, '-k',
+              '--start-number', $i++, '-1', $id);
           }
         }
         else {
@@ -857,9 +861,13 @@ sub do_format_patch {
 
   my $ctx = {db => $db, ttl => scalar(@repos), log => $log, fail => {},};
 
-  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
-    ->command($process)->context($ctx)->on_finish($on_finish)
-    ->init->execute(@repos);
+  Ptk::Base::Executor->new(
+    log       => $log,
+    workers   => $opt{jobs},
+    command   => $process,
+    context   => $ctx,
+    on_finish => $on_finish,
+  )->execute(@repos);
 
   print <<EOF;
 #-- DONE
@@ -1052,10 +1060,13 @@ sub do_match_cherry {
 
   my $ctx = {db => $db, ttl => scalar(@repos), log => $log,};
 
-  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
-    ->command($process)->context($ctx)->on_finish($on_finish)
-    ->init->execute(@repos);
-
+  Ptk::Base::Executor->new(
+    log       => $log,
+    workers   => $opt{jobs},
+    command   => $process,
+    context   => $ctx,
+    on_finish => $on_finish,
+  )->execute(@repos);
 
   local $\ = "\n";
   my $sep = "\t";
@@ -1115,9 +1126,13 @@ sub do_report_log {
 
   my $ctx = {db => $db, ttl => scalar(@repos), log => $log,};
 
-  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
-    ->command($process)->context($ctx)->on_finish($on_finish)
-    ->init->execute(@repos);
+  Ptk::Base::Executor->new(
+    log       => $log,
+    workers   => $opt{jobs},
+    command   => $process,
+    context   => $ctx,
+    on_finish => $on_finish,
+  )->execute(@repos);
 
   db_to_xls($dst, $db);
 }
@@ -1167,9 +1182,13 @@ sub do_report_delta {
 
   my $ctx = {db => $db, ttl => scalar(@repos), log => $log,};
 
-  Ptk::Base::Executor->new->log($log)->max_workers($opt{jobs})
-    ->command($process)->context($ctx)->on_finish($on_finish)
-    ->init->execute(@repos);
+  Ptk::Base::Executor->new(
+    log       => $log,
+    workers   => $opt{jobs},
+    command   => $process,
+    context   => $ctx,
+    on_finish => $on_finish,
+  )->execute(@repos);
 
   db_to_xls($dst, $db);
 }

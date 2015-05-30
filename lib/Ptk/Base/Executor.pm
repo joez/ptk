@@ -5,9 +5,9 @@ use Ptk::Base -base;
 
 use Parallel::ForkManager;
 
-has max_workers => 1;
-has context     => sub { {} };
-has command     => sub {
+has workers => 1;
+has context => sub { {} };
+has command => sub {
   sub { }
 };
 has [qw/on_start on_finish/] => sub {
@@ -20,7 +20,7 @@ sub execute {
   my $ttl = scalar(@_);
   return unless $ttl > 0;
 
-  my $fm = Parallel::ForkManager->new($self->max_workers);
+  my $fm = Parallel::ForkManager->new($self->workers);
 
   # ($idx, $ttl);
   $fm->run_on_start(sub { $self->_on_start($_[1], $ttl) });
