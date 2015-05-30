@@ -12,21 +12,38 @@ use File::Spec::Functions qw/catfile/;
 use XML::Reader qw/XML::Parsepp/;
 use XML::Writer;
 
-has files        => sub { ['.repo/manifests/default.xml'] };
-has includes     => sub { [] };
-has projects     => sub { [] };
-has project_data => sub { {} };
-has path_to_name => sub { {} };
-has remotes      => sub { [] };
-has remote_data  => sub { {} };
-has default      => sub { {} };
+has path          => '.repo/manifests/default.xml';
+has include       => sub { [] };
+has default       => sub { {} };
+has _projects     => sub { [] };
+has _project_data => sub { {} };
+has _path_to_name => sub { {} };
+has _remotes      => sub { [] };
+has _remote_data  => sub { {} };
 
-sub init {
-  my $self = shift->SUPER::init;
+sub new {
+  my $class = shift;
+  my $path  = shift;
 
-  for my $file (@{$self->files}) {
-    $self->_parse($file);
-  }
+  my $self = $class->SUPER::new(@_);
+  $self->path($path) if defined $path;
+
+  return $self->load;
+}
+
+sub load {
+  my $self = shift;
+
+  $self->_parse($self->path);
+
+  return $self;
+}
+
+sub save {
+  my $self = shift;
+  my $file = shift // $self->path;
+
+  # TODO
 
   return $self;
 }
@@ -38,12 +55,12 @@ sub add_project {
 
   # there is no "path" defined for mirror project
   my $path = $attr->{path} || $name;
-  my $data = $self->project_data;
+  my $data = $self->_project_data;
 
-  push @{$self->projects}, $name unless $data->{$name};
+  push @{$self->_projects}, $name unless $data->{$name};
   $data->{$name} = $attr;
 
-  $self->path_to_name->{$path} = $name;
+  $self->_path_to_name->{$path} = $name;
 
   return $self;
 }
@@ -52,25 +69,25 @@ sub del_project {
   my $self = shift;
   my $name = shift or die;
 
-  my $data     = $self->project_data;
-  my $projects = $self->projects;
+  my $data     = $self->_project_data;
+  my $projects = $self->_projects;
 
   if (my $p = delete $data->{$name}) {
     my $path = $p->{path};
-    $self->projects([grep { $_ ne $name } @$projects]);
-    delete $self->path_to_name->{$path};
+    $self->_projects([grep { $_ ne $name } @$projects]);
+    delete $self->_path_to_name->{$path};
   }
 
   return $self;
 }
 
-sub get_project_name_by_path { $_[0]->path_to_name->{$_[1]} }
+sub get_project_name_by_path { $_[0]->_path_to_name->{$_[1]} }
 
 sub get_project {
   my $self = shift;
   my $name = shift or die;
 
-  my $data = $self->project_data;
+  my $data = $self->_project_data;
 
   # first by name, then by path
   my $r = $data->{$name};
@@ -113,11 +130,11 @@ sub list_project_names {
   my $self  = shift;
   my $query = shift;
 
-  return @{$self->projects} unless $query;
+  return @{$self->_projects} unless $query;
 
-  my $matcher = Ptk::Gex::Matcher->new->pattern($query)->init;
+  my $matcher = Ptk::Gex::Matcher->new($query);
   my @result  = ();
-  for (@{$self->projects}) {
+  for (@{$self->_projects}) {
     push @result, $_ if $matcher->match($self->get_resolved_project($_));
   }
 
@@ -138,15 +155,15 @@ sub add_remote {
   my $name = shift or die;
   my $attr = shift or die;
 
-  my $data = $self->remote_data;
+  my $data = $self->_remote_data;
 
-  push @{$self->remotes}, $name unless $data->{$name};
+  push @{$self->_remotes}, $name unless $data->{$name};
   $data->{$name} = $attr;
 
   return $self;
 }
 
-sub get_remote { $_[0]->remote_data->{$_[1]} }
+sub get_remote { $_[0]->_remote_data->{$_[1]} }
 
 sub _parse {
   my $self = shift;
@@ -177,8 +194,10 @@ sub _parse {
 
       if ($path eq $xpath{include}) {
         if ($attr->{name}) {
-          my $m = catfile(dirname($file), $attr->{name});
-          push @{$self->includes}, $m;
+
+          # relative to the main manifest file
+          my $m = catfile(dirname($self->path), $attr->{name});
+          push @{$self->include}, $m;
 
           # parse included manifest
           $self->_parse($m);

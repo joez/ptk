@@ -3,7 +3,7 @@
 package Ptk::Gex::Matcher;
 use Ptk::Base 'Ptk::Base::Matcher';
 
-# there are multiple query items in the pattern
+# there are multiple query items in the query
 # if one of the items match, the result is true
 # if all the items fail to match, the result is false
 #
@@ -15,14 +15,14 @@ sub match {
 
   return 0 unless $info;
 
-  my $pattern = $self->pattern;
-  return 1 unless $pattern;
+  my $query = $self->query;
+  return 1 unless $query;
 
-  my $p = $self->stash('pattern');
+  my $p = $self->stash('query');
   unless ($p) {
     $p = [];
 
-    for my $item (split /\s+/, $pattern) {
+    for my $item (split /\s+/, $query) {
       my $i = [];
       for (split ',', $item) {
         my ($k, $v) = split ':';
@@ -33,14 +33,14 @@ sub match {
       push @$p, $i;
     }
 
-    $self->stash('pattern', $p);
+    $self->stash('query', $p);
   }
 
   return 1 unless @$p;
 
-ITEM: for my $query (@$p) {
-    for my $item (@$query) {
-      my ($k, $q, $r) = @{$item}{qw/k q r/};
+ITEM: for my $item (@$p) {
+    for my $i (@$item) {
+      my ($k, $q, $r) = @{$i}{qw/k q r/};
       my $v = $info->{$k} || '';
 
       next ITEM unless ($r ? $v !~ $q : $v =~ $q);

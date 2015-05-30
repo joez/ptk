@@ -3,7 +3,17 @@
 package Ptk::Base::Matcher;
 use Ptk::Base -base;
 
-has 'pattern';
+has 'query';
+
+sub new {
+  my $class = shift;
+  my $query = shift;
+
+  my $self = $class->SUPER::new(@_);
+  $self->query($query) if defined $query;
+
+  return $self;
+}
 
 sub match {
   my $self = shift;
@@ -11,13 +21,13 @@ sub match {
 
   return 0 unless $info;
 
-  my $pattern = $self->pattern;
-  return 1 unless $pattern;
+  my $query = $self->query;
+  return 1 unless $query;
 
-  my $re = $self->stash('pattern');
+  my $re = $self->stash('query');
   unless ($re) {
-    $re = qr/$pattern/;
-    $self->stash('pattern', $re);
+    $re = qr/$query/;
+    $self->stash('query', $re);
   }
 
   return $info =~ $re;
