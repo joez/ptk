@@ -9,7 +9,12 @@ use Carp 'croak';
 use File::Basename;
 use File::Spec::Functions qw/catfile/;
 
-use XML::Reader qw/XML::Parsepp/;
+BEGIN {
+  require XML::Reader;
+  XML::Reader->import(
+    eval "require XML::Parser; 1" ? 'XML::Parser' : 'XML::Parsepp');
+}
+
 use XML::Writer;
 use IO::File;
 
