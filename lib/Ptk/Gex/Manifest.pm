@@ -11,6 +11,7 @@ use File::Spec::Functions qw/catfile/;
 
 use XML::Reader qw/XML::Parsepp/;
 use XML::Writer;
+use IO::File;
 
 has path          => '.repo/manifests/default.xml';
 has include       => sub { [] };
@@ -33,6 +34,9 @@ sub new {
 
 sub load {
   my $self = shift;
+  my $path = shift // $self->path;
+
+  $self->path($path)->include([]);
 
   $self->_parse($self->path);
 
@@ -41,9 +45,41 @@ sub load {
 
 sub save {
   my $self = shift;
-  my $file = shift // $self->path;
+  my $path = shift // $self->path;
 
   # TODO
+  my $out = IO::File->new($path, 'w');
+  my $wtr = XML::Writer->new(
+    OUTPUT      => $out,
+    ENCODING    => 'UTF-8',
+    UNSAFE      => 1,
+    DATA_MODE   => 1,
+    DATA_INDENT => 4,
+  );
+  $wtr->xmlDecl();
+  $wtr->startTag('manifest');
+
+  for my $n (sort +$self->list_remote_names) {
+    my $item = $self->get_remote($n);
+    my @attr = map { ($_, $item->{$_}) } sort keys %$item;
+    $wtr->emptyTag('remote', @attr);
+  }
+  $wtr->characters("\n");
+
+  my $default = $self->default;
+  $wtr->emptyTag('default', map { ($_, $default->{$_}) } sort keys %$default);
+  $wtr->characters("\n");
+
+  for my $n (sort +$self->list_project_names) {
+    my $item = $self->get_project($n);
+    my @attr = map { ($_, $item->{$_}) } sort keys %$item;
+    $wtr->emptyTag('project', @attr);
+  }
+
+  $wtr->endTag('manifest');
+  $wtr->end();
+
+  $out->close();
 
   return $self;
 }
@@ -164,6 +200,8 @@ sub add_remote {
 }
 
 sub get_remote { $_[0]->_remote_data->{$_[1]} }
+
+sub list_remote_names { @{shift->_remotes} }
 
 sub _parse {
   my $self = shift;

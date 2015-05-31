@@ -55,6 +55,7 @@ SYNOPSIS
     $script match-cherry [<options>] <this> <that> [<src>...]
 
     $script overlay-manifest [<options>] <this> <that> [<src>...]
+    $script dump-manifest [<options>] [<src>...]
 
     $script find-repo [<src>...]
     $script dump-repo [<options>] [<src>...]
@@ -135,6 +136,11 @@ COMMAND
       <this>:  the target manifest
       <that>:  the snapshot manifest to be applied
       <src>:   the Git repo paths or names
+
+    $script dump-manifest [-o <output>] [<src>...]
+      load all the provided manifests sequencially and dump to the output
+      <output>:  the output file, default is "manifest.xml"
+      <src>:     the manifest files to load, default ".repo/manifests/default.xml"
 
     $script find-repo [<src>...]
       find valid Git repo in the <src> directories and output the paths,
@@ -226,6 +232,9 @@ EXAMPLES
       add a tag named TAG_FOR_TEST for each repo listed in repo-list.txt
       based on the revision defined from pin.xml
 
+    15. $script dump-manifest -o manifest.xml
+      load default manifest ".repo/manifests/default.xml" and save it to
+      manifest.xml
 NOTES
     * all the Git repo paths are assumed relative to the root,
       if a path pointing to a existing file, it will be regarded as a
@@ -278,6 +287,7 @@ my %cmdcbs = (
   "tag-manifest"     => \&do_tag_manifest,
   "format-patch"     => \&do_format_patch,
   "overlay-manifest" => \&do_overlay_manifest,
+  "dump-manifest"    => \&do_dump_manifest,
 );
 
 my $cb = $cmdcbs{$cmd};
@@ -877,6 +887,18 @@ EOF
   my @fail = map { $repos[$_] } keys %{$ctx->{fail}};
   print 'Total ', scalar @fail, ' projects are failed:', "\n";
   print join("\n", @fail), "\n";
+}
+
+sub do_dump_manifest {
+  my @manifests = @_;
+  unshift @manifests, catfile(@opt{qw/url manifest/}) unless @manifests;
+
+  my $out = $opt{output} || 'manifest.xml';
+
+  my $m = Ptk::Gex::Manifest->new(shift @manifests);
+  $m->load($_) for @manifests;
+
+  $m->save($out);
 }
 
 sub do_overlay_manifest {
