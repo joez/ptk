@@ -1284,6 +1284,10 @@ sub parse_commit_message {
       $d->{request_id} = $1;
       next;
     }
+    if (/^Topic:\s+(.+?)\s*$/) {
+      $d->{topic} = $1;
+      next;
+    }
     if (/^\(cherry picked from commit ([\da-f]{40})$/) {
       push @{$d->{origin_ids}}, $1;
       $d->{origin_id} = $1;
@@ -1461,12 +1465,12 @@ sub db_to_xls {
 
   # "data" worksheet
   if ($NEED->($sheet = "data")) {
-    my @info = qw/ID Author Email Subject Repo Committer Date Gerrit/;
+    my @info = qw/ID Author Email Subject Repo Committer Date Gerrit Topic/;
     @head = (@info, qw/System Status Type Owner Team Note/);
-    @width = (42, 14, 24, 56, 40, 14, 10, 8, 8, 8, 8, 14, 8, 18);
+    @width = (42, 14, 24, 56, 40, 14, 10, 8, 18, 8, 8, 8, 14, 8, 18);
     my %fields;
     @fields{@info}
-      = qw/commit author_name author_email subject repo committer_name committer_time request_id/;
+      = qw/commit author_name author_email subject repo committer_name committer_time request_id topic/;
     my %head_idx;
     {
       my $i;
