@@ -607,7 +607,7 @@ sub get_local_rev {
 
 sub do_clone {
   $opt{path}    = 1;
-  $opt{command} = 'git clone $REPO_FETCH/$REPO_PROJECT .';
+  $opt{command} = 'git clone -o $REPO_REMOTE -b $REPO_RREV $REPO_FETCH/$REPO_PROJECT .';
 
   do_forall(@ARGV);
 }
