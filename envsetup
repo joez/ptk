@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
-function show_hint
+function ptk_print_env
 {
     cat <<EOF
 
 ============================================
-PTK environment setup is done.
+PTK environment:
 
 PTK_HOME=$PTK_HOME
 PTK_BIN=$PTK_BIN
@@ -20,35 +20,67 @@ PTK_LOG_LEVEL=$PTK_LOG_LEVEL
 EOF
 }
 
+function ptk_update_cpanm
+{
+    mkdir -p $PTK_BIN
+    curl -L https://cpanmin.us/ -o $PTK_CPANM
+    chmod +x $PTK_CPANM
+}
+
+function ptk_cpanm
+{
+    $PTK_CPANM --mirror http://mirrors.163.com/cpan --mirror http://cpan.cpantesters.org -l $PTK_EXT $@
+}
+
+function ptk_update_ext
+{
+    mkdir -p $PTK_EXT
+    ptk_cpanm -n --installdeps $PTK_HOME
+    date > $PTK_EXT/.updated
+}
+
 # Mac OS does not support GNU "readlink -f", so use Perl instead
-function readlinkf
+function ptk_readlink
 {
     perl -MCwd -e 'print Cwd::abs_path shift' "$1"
 }
 
-if [ "$0" = "$BASH_SOURCE" ]; then
+if [[ $0 == $BASH_SOURCE ]]; then
     echo 'Invoke using "source" please, e.g.'
     echo "    source $BASH_SOURCE"
 else
-    # clear the old
-    if [ -n "$PTK_BIN" ]; then
-        export PATH=${PATH/$PTK_BIN:/}
-    fi
-    if [ -n "$PTK_LIB" ]; then
-        export PERL5LIB=${PERL5LIB/$PTK_LIB:/}
-    fi
-
     # PTK home dir, where PTK is deployed
-    export PTK_HOME=$(dirname $(readlinkf $BASH_SOURCE))
+    export PTK_HOME=$(dirname $(ptk_readlink $BASH_SOURCE))
 
     export PTK_BIN=$PTK_HOME/bin
     export PTK_LIB=$PTK_HOME/lib
 
+    # no need to export
+    PTK_EXT=$PTK_HOME/ext
+    PTK_CPANM=$PTK_BIN/cpanm
+
     # log level: [debug, info, warn, error, fatal]
     export PTK_LOG_LEVEL=info
 
-    export PATH=$PTK_BIN:$PATH
-    export PERL5LIB=$PTK_LIB:$PERL5LIB
+    # deploy the cpanm if not exist
+    if [[ ! -f $PTK_CPANM ]]; then
+        ptk_update_cpanm
+    fi
 
-    show_hint
+    # deploy the ext if not exist or hasn't been fully updated
+    if [[ ! -d $PTK_EXT || ! -f $PTK_EXT/.updated ]]; then
+        ptk_update_ext
+    fi
+
+    # setup the local lib
+    eval "$(perl -I$PTK_EXT/lib/perl5 -Mlocal::lib=$PTK_EXT)"
+
+    if [[ ! $PATH =~ $PTK_BIN: ]]; then
+        export PATH=$PTK_BIN:$PATH
+    fi
+    if [[ ! $PERL5LIB =~ $PTK_LIB: ]]; then
+        export PERL5LIB=$PTK_LIB:$PERL5LIB
+    fi
+
+    ptk_print_env
 fi
