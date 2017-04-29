@@ -35,8 +35,7 @@ function ptk_cpanm
 function ptk_update_ext
 {
     mkdir -p $PTK_EXT
-    ptk_cpanm -n --installdeps $PTK_HOME
-    date > $PTK_EXT/.updated
+    ptk_cpanm -n --installdeps $PTK_HOME && date > $PTK_EXT/.updated
 }
 
 # Mac OS does not support GNU "readlink -f", so use Perl instead
