@@ -29,17 +29,20 @@ WriteMakefile(
   },
   PREREQ_PM => {
     'local::lib'            => '2.0',
+    'Perl::Tidy'            => '2016',
     'Mojolicious'           => '7.0',
     'Parallel::ForkManager' => '1.12',
     'XML::Reader'           => '0.49',
-    'XML::Writer'           => '0.615',
+    'XML::Writer'           => '0.61',
     'XML::Parsepp'          => '0.08',
 
     # for gex
-    'Git::Repository' => '1.313',
-    'Archive::Zip'    => '1.46',
-    'System::Command' => '1.111',
+    'Git::Repository::Log' => '1.31',
+    'Archive::Zip'         => '1.46',
+    'System::Command'      => '1.111',
+    'Excel::Writer::XLSX'  => '0.67',
   },
-  EXE_FILES => ['bin/gex'],
-  test      => {TESTS => 't/*.t t/*/*.t'}
+  BUILD_REQUIRES => {'Test::More' => '1.30',},
+  EXE_FILES      => ['bin/gex'],
+  test           => {TESTS        => 't/*.t t/*/*.t'}
 );
