@@ -1,6 +1,6 @@
 # author: joe.zheng
 
-package Ptk::Base::Log;
+package Ptk::Log;
 use base 'Mojo::Log';
 use Ptk::Base -base;
 

@@ -30,12 +30,12 @@ use Digest::MD5 qw/md5_hex/;
 
 use Parallel::ForkManager;
 
-use Ptk::Base::Log;
-use Ptk::Base::Chdir;
+use Ptk::Log;
+use Ptk::Chdir;
 use Ptk::Gex::Manifest;
-use Ptk::Base::Executor;
+use Ptk::Executor;
 
-my $log = Ptk::Base::Log->new;
+my $log = Ptk::Log->new;
 
 my $script = basename($0);
 
@@ -606,8 +606,9 @@ sub get_local_rev {
 }
 
 sub do_clone {
-  $opt{path}    = 1;
-  $opt{command} = 'git clone -o $REPO_REMOTE -b $REPO_RREV $REPO_FETCH/$REPO_PROJECT .';
+  $opt{path} = 1;
+  $opt{command}
+    = 'git clone -o $REPO_REMOTE -b $REPO_RREV $REPO_FETCH/$REPO_PROJECT .';
 
   do_forall(@ARGV);
 }
@@ -667,7 +668,7 @@ sub do_forall {
       make_path($path) unless -e $path;
     }
 
-    my $chdir = Ptk::Base::Chdir->new;
+    my $chdir = Ptk::Chdir->new;
     unless ($chdir->pushd($path)) {
       $log->warn("fail to access $path, skip: $repo");
     }
@@ -692,7 +693,7 @@ sub do_forall {
 
   my $ctx = {fail => {}, ttl => scalar(@repos), log => $log,};
 
-  Ptk::Base::Executor->new(
+  Ptk::Executor->new(
     log       => $log,
     workers   => $opt{jobs},
     command   => $process,
@@ -900,7 +901,7 @@ sub do_format_patch {
 
   my $ctx = {db => $db, ttl => scalar(@repos), log => $log, fail => {},};
 
-  Ptk::Base::Executor->new(
+  Ptk::Executor->new(
     log       => $log,
     workers   => $opt{jobs},
     command   => $process,
@@ -1111,7 +1112,7 @@ sub do_match_cherry {
 
   my $ctx = {db => $db, ttl => scalar(@repos), log => $log,};
 
-  Ptk::Base::Executor->new(
+  Ptk::Executor->new(
     log       => $log,
     workers   => $opt{jobs},
     command   => $process,
@@ -1177,7 +1178,7 @@ sub do_report_log {
 
   my $ctx = {db => $db, ttl => scalar(@repos), log => $log,};
 
-  Ptk::Base::Executor->new(
+  Ptk::Executor->new(
     log       => $log,
     workers   => $opt{jobs},
     command   => $process,
@@ -1233,7 +1234,7 @@ sub do_report_delta {
 
   my $ctx = {db => $db, ttl => scalar(@repos), log => $log,};
 
-  Ptk::Base::Executor->new(
+  Ptk::Executor->new(
     log       => $log,
     workers   => $opt{jobs},
     command   => $process,

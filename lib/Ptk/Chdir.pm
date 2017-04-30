@@ -1,6 +1,6 @@
 # author: joe.zheng
 
-package Ptk::Base::Chdir;
+package Ptk::Chdir;
 use Ptk::Base -base;
 
 use Cwd qw/getcwd/;

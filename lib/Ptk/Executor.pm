@@ -1,6 +1,6 @@
 # author: joe.zheng
 
-package Ptk::Base::Executor;
+package Ptk::Executor;
 use Ptk::Base -base;
 
 use Parallel::ForkManager;

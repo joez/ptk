@@ -1,6 +1,6 @@
 # author: joe.zheng
 
-package Ptk::Base::Matcher;
+package Ptk::Matcher;
 use Ptk::Base -base;
 
 has 'query';

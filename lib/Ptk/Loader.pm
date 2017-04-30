@@ -1,6 +1,6 @@
 # author: joe.zheng
 
-package Ptk::Base::Loader;
+package Ptk::Loader;
 use Ptk::Base -base;
 
 use Mojo::Util qw/monkey_patch/;
@@ -23,13 +23,13 @@ __END__
 
 =head1 NAME
 
-Ptk::Base::Loader - Load all kinds of things
+Ptk::Loader - Load all kinds of things
 
 =head1 SYNOPSIS
 
-  use Ptk::Base::Loader;
+  use Ptk::Loader;
 
-  my $ldr = Ptk::Base::Loader->new;
+  my $ldr = Ptk::Loader->new;
   # Find modules in a namespace
   for my $module ($ldr->find_modules('Some::Namespace')) {
 
@@ -43,7 +43,7 @@ Ptk::Base::Loader - Load all kinds of things
 
 =head1 DESCRIPTION
 
-L<Ptk::Base::Loader> is a class wrapper of L<Mojo::Loader>
+L<Ptk::Loader> is a class wrapper of L<Mojo::Loader>
 
 =head1 SEE ALSO
 
