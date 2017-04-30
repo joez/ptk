@@ -305,7 +305,8 @@ by L<repo|https://gerrit.googlesource.com/git-repo> tool.
 
 =head1 ATTRIBUTES
 
-L<Ptk::Manifest> implements the following attributes.
+L<Ptk::Manifest> inherits all attributes from L<Ptk::Base> and implements the
+following new ones.
 
 =head2 path
 
@@ -316,7 +317,8 @@ The file path of the manifest, defaults to '.repo/manifests/default.xml'.
 
 =head1 METHODS
 
-L<Ptk::Manifest> implements the following methods.
+L<Ptk::Manifest> inherits all methods from L<Ptk::Base> and implements the
+following new ones.
 
 =head2 load
 
