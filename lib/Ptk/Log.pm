@@ -4,33 +4,25 @@ package Ptk::Log;
 use base 'Mojo::Log';
 use Ptk::Base -base;
 
-use Carp 'croak';
 use Data::Dumper;
-use File::Path qw/make_path/;
-use File::Basename qw/dirname/;
-
+use Mojo::File;
 use Mojo::Util qw/encode/;
 
-has level => sub { $ENV{PTK_LOG_LEVEL} // 'debug' };
-has format => sub { \&_format };
 
 my $_dumper
   = Data::Dumper->new([])->Terse(1)->Deepcopy(1)->Indent(0)->Pair(':');
 
+has level => sub { $ENV{PTK_LOG_LEVEL} // $ENV{MOJO_LOG_LEVEL} // 'debug' };
+has format => sub { \&_format };
 has handle => sub {
-  my $self = shift;
-
-  # File
-  if (my $path = $self->path) {
-    my $dir = dirname($path);
-    make_path($dir) unless -e $dir;
-
-    open my $fh, '>>', $path or croak qq/Can't open log file "$path": $!/;
-    return $fh;
-  }
 
   # STDERR
-  return \*STDERR;
+  return \*STDERR unless my $path = shift->path;
+
+  # File
+  my $file = Mojo::File->new($path);
+  $file->dirname->make_path;
+  return $file->open('>>');
 };
 
 sub _format {
