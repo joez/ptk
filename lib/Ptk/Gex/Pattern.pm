@@ -1,7 +1,7 @@
 # author: joe.zheng
 
-package Ptk::Gex::Matcher;
-use Ptk::Base 'Ptk::Matcher';
+package Ptk::Gex::Pattern;
+use Ptk::Base 'Ptk::Pattern';
 
 # there are multiple query items in the query
 # if one of the items match, the result is true

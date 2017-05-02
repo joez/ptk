@@ -2,7 +2,7 @@
 
 package Ptk::Gex::Manifest;
 use Ptk::Base -base;
-use Ptk::Gex::Matcher;
+use Ptk::Gex::Pattern;
 
 use Carp 'croak';
 
@@ -176,10 +176,10 @@ sub list_project_names {
 
   return @{$self->_projects} unless $query;
 
-  my $matcher = Ptk::Gex::Matcher->new($query);
+  my $pattern = Ptk::Gex::Pattern->new($query);
   my @result  = ();
   for (@{$self->_projects}) {
-    push @result, $_ if $matcher->match($self->get_resolved_project($_));
+    push @result, $_ if $pattern->match($self->get_resolved_project($_));
   }
 
   return @result;
@@ -187,11 +187,11 @@ sub list_project_names {
 
 sub list_project_paths {
   my $self    = shift;
-  my $matcher = shift;
+  my $pattern = shift;
 
   return
     map { $self->get_resolved_project($_)->{path} }
-    $self->list_project_names($matcher);
+    $self->list_project_names($pattern);
 }
 
 sub add_remote {
