@@ -45,3 +45,41 @@ sub _dump { join ', ', $_dumper->Values(\@_)->Dump }
 
 1;
 __END__
+
+=encoding utf8
+
+=head1 NAME
+
+Ptk::Log - Simple and convenient logger
+
+=head1 SYNOPSIS
+
+  use Ptk::Log;
+
+  # Log to STDERR
+  my $log = Ptk::Log->new;
+
+  # Customize log file location and minimum log level
+  my $log = Ptk::Log->new(path => '/var/log/ptk.log', level => 'warn');
+
+  # Log messages
+  $log->debug('Let us dig further');
+  $log->info('FYI');
+  $log->warn('This might be a problem');
+  $log->error('I am sure it is wrong');
+  $log->fatal('WTF');
+
+=head1 DESCRIPTION
+
+L<Ptk::Log> is based on L<Mojo::Log>, with shorter output and current PID,
+and support creating parent directories for the log file and dumping
+complicated data structure automatically
+
+You can override the default log level with environment variable
+PTK_LOG_LEVEL or MOJO_LOG_LEVEL
+
+=head1 SEE ALSO
+
+L<Ptk>, L<Mojo::Log>, L<https://github.com/joez/ptk>.
+
+=cut
