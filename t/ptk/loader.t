@@ -5,7 +5,7 @@ use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
 
-use Ptk::Base::Loader;
+use Ptk::Loader;
 
 package MyLoaderTest::Foo::Bar;
 
@@ -13,7 +13,7 @@ package MyLoaderTest::Foo::Baz;
 
 package main;
 
-my $ldr = Ptk::Base::Loader->new;
+my $ldr = Ptk::Loader->new;
 
 # Single character core module
 ok !$ldr->load_class('B'), 'loaded';
