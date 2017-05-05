@@ -5,14 +5,18 @@ use Mojo::Base -base;
 
 use Mojo::Util;
 
-has log => sub { require Ptk::Log;    Ptk::Log->new };
-has ldr => sub { require Ptk::Loader; Ptk::Loader->new };
+# CAUTION: hack here
+# patch base module to ensure we can extend Mojo modules with the same base
 
-sub clone { $_[0]->new($_[0]) }
+Mojo::Base::attr 'Mojo::Base', log => sub { require Ptk::Log; Ptk::Log->new };
+Mojo::Base::attr 'Mojo::Base',
+  ldr => sub { require Ptk::Loader; Ptk::Loader->new };
 
-sub stash { Mojo::Util::_stash(stash => @_) }
+sub Mojo::Base::clone { $_[0]->new($_[0]) }
 
-sub reset_stash { $_[0]->{stash} = {} and $_[0] }
+sub Mojo::Base::stash { Mojo::Util::_stash(stash => @_) }
+
+sub Mojo::Base::reset_stash { $_[0]->{stash} = {} and $_[0] }
 
 1;
 __END__

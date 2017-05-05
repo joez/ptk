@@ -1,8 +1,7 @@
 # author: joe.zheng
 
 package Ptk::Log;
-use base 'Mojo::Log';
-use Ptk::Base -base;
+use Ptk::Base 'Mojo::Log';
 
 use Data::Dumper;
 use Mojo::File;
