@@ -101,6 +101,6 @@ It returns true on success, false otherwise.
 
 =head1 SEE ALSO
 
-L<Ptk>, L<Ptk::Chdir>, L<https://github.com/joez/ptk>.
+L<Ptk>, L<Ptk::Base>, L<https://github.com/joez/ptk>.
 
 =cut
