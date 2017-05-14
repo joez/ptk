@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+
+  <remote  name="remote1"
+           fetch="https://source.remote1.org"
+           review="https://review.remote1.org" />
+  <remote  name="remote2"
+           fetch="https://source.remote2.org/"
+           review="https://review.remote2.org/" />
+</manifest>

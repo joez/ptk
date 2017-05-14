@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+
+  <!-- BEGIN special projects  -->
+  <project path="copyfile" name="copyfile" groups="special" >
+    <copyfile src="copyfile" dest="copyfile" />
+  </project>
+  <project path="linkfile" name="linkfile" groups="special" >
+    <linkfile src="linkfile" dest="linkfile" />
+  </project>
+  <!-- END special projects -->
+
+  <!-- BEGIN normal projects  -->
+  <project path="project1" name="project1" />
+  <project path="project2" name="project2" />
+  <!-- END normal projects -->
+
+  <!-- BEGIN projects to be removed -->
+  <project path="remove" name="remove" groups="remove" />
+  <!-- END projects to be removed -->
+
+</manifest>

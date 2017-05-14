@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+
+  <default revision="master"
+           remote="remote1"
+           sync-j="4" />
+
+  <include name="include/remote.xml" />
+  <include name="include/test.xml" />
+  <include name="include/remove.xml" />
+
+  <remove-project name="project2" />
+  <project path="modified" name="project2" revision="develop" groups="modify" />
+
+</manifest>
