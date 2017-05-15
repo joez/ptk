@@ -34,7 +34,6 @@ WriteMakefile(
     'Parallel::ForkManager' => '1.12',
     'XML::Reader'           => '0.49',
     'XML::Writer'           => '0.61',
-    'XML::Parsepp'          => '0.08',
 
     # for gex
     'Git::Repository::Log' => '1.31',
