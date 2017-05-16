@@ -8,5 +8,4 @@ perl:
   - "5.12"
   - "5.10"
 install:
-  - perl -e 'exit(1) if $] >= 5.014' && cpanm -n -l ext XML::Reader@0.64 XML::Parser
   - source envsetup

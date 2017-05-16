@@ -35,6 +35,10 @@ function ptk_cpanm
 function ptk_update_ext
 {
     mkdir -p $PTK_EXT
+    # WA for Perl < 5.14.0
+    if [[ -n `perl -e 'print 1 if $] < 5.014'` ]]; then
+        ptk_cpanm -n XML::Reader@0.64 XML::Parser
+    fi
     ptk_cpanm -n --installdeps $PTK_HOME && date > $PTK_EXT/.updated
 }
 
