@@ -10,7 +10,11 @@ use lib "$FindBin::RealBin/../lib";
 use Excel::Writer::XLSX;
 use Excel::Writer::XLSX::Utility;
 
-use XML::Reader qw/XML::Parsepp/;
+BEGIN {
+  require XML::Reader;
+  XML::Reader->import(
+    eval "require XML::Parser; 1" ? 'XML::Parser' : 'XML::Parsepp');
+}
 use XML::Writer;
 
 use Encode qw/decode/;
