@@ -10,13 +10,6 @@ use lib "$FindBin::RealBin/../lib";
 use Excel::Writer::XLSX;
 use Excel::Writer::XLSX::Utility;
 
-BEGIN {
-  require XML::Reader;
-  XML::Reader->import(
-    eval "require XML::Parser; 1" ? 'XML::Parser' : 'XML::Parsepp');
-}
-use XML::Writer;
-
 use Encode qw/decode/;
 use Encode::Guess;
 
@@ -28,11 +21,8 @@ use File::Basename;
 use File::Spec::Functions qw/catdir catfile rel2abs/;
 use File::Find 'find';
 use File::Temp qw/tempdir/;
-use Storable qw/nstore retrieve/;
 use Text::ParseWords;
 use Digest::MD5 qw/md5_hex/;
-
-use Parallel::ForkManager;
 
 use Ptk::Log;
 use Ptk::Chdir;
