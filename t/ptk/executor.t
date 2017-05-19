@@ -8,8 +8,8 @@ use lib "$FindBin::Bin/lib";
 use Ptk::Executor;
 use Storable qw/dclone/;
 
-my $workers  = 5;
-my @tasks    = (1 .. 10);
+my $workers  = 3;
+my @tasks    = (1 .. 4);
 my $context  = {start => [], done => [], ok => []};
 my $command  = sub { my ($idx, $ctx, $task, $exit) = @_; $exit->(0, \$idx) };
 my $on_start = sub {
@@ -32,7 +32,7 @@ my $executor = Ptk::Executor->new(
   on_finish => $on_finish,
 );
 
-# API
+# Public API
 can_ok $executor, qw/workers context command on_start on_finish execute/;
 
 # Normal usage
@@ -54,11 +54,19 @@ is scalar @{$executor->context->{start}}, scalar @tasks,
 is scalar @{$executor->context->{ok}}, scalar @tasks, 'tasks ok with nop';
 is scalar @{$executor->context->{done}}, 0, 'tasks done with nop';
 
-# Die in the command
-$executor->context(dclone($context))->command(sub {die})->execute(@tasks);
+# Exit 0 in the command
+$executor->context(dclone($context))->command(sub {exit})->execute(@tasks);
 is scalar @{$executor->context->{start}}, scalar @tasks,
-  'tasks started with die';
-is scalar @{$executor->context->{ok}},   0, 'tasks ok with die';
-is scalar @{$executor->context->{done}}, 0, 'tasks done with die';
+  'tasks started with exit';
+is scalar @{$executor->context->{ok}}, scalar @tasks, 'tasks ok with exit';
+is scalar @{$executor->context->{done}}, 0, 'tasks done with exit';
+
+# Exit -1 in the command
+$executor->context(dclone($context))->command(sub { exit(-1) })
+  ->execute(@tasks);
+is scalar @{$executor->context->{start}}, scalar @tasks,
+  'tasks started with exit -1';
+is scalar @{$executor->context->{ok}},   0, 'tasks ok with exit -1';
+is scalar @{$executor->context->{done}}, 0, 'tasks done with exit -1';
 
 done_testing();
