@@ -9,14 +9,13 @@ use Carp 'croak';
 use File::Basename;
 use File::Spec::Functions qw/catfile/;
 
-BEGIN {
-  require XML::Reader;
-  XML::Reader->import(
-    eval "require XML::Parser; 1" ? 'XML::Parser' : 'XML::Parsepp');
-}
-
 use XML::Writer;
-use IO::File;
+
+use Mojo::DOM;
+use Mojo::File;
+
+# avoid name colission
+sub _p { Mojo::File::path(@_) }
 
 has path          => '.repo/manifests/default.xml';
 has include       => sub { [] };
@@ -53,7 +52,7 @@ sub save {
   my $path = shift // $self->path;
 
   # TODO
-  my $out = IO::File->new($path, 'w');
+  my $out = _p($path)->open('w');
   my $wtr = XML::Writer->new(
     OUTPUT      => $out,
     ENCODING    => 'UTF-8',
@@ -226,52 +225,32 @@ sub _parse {
     return $self;
   }
 
-  my %xpath = (
-    manifest         => '/manifest',
-    remote           => '/manifest/remote',
-    include          => '/manifest/include',
-    default          => '/manifest/default',
-    project          => '/manifest/project',
-    'remove-project' => '/manifest/remove-project',
-  );
-  my $rdr = XML::Reader->new($file, {mode => 'attr-in-hash'});
+  my $dom = Mojo::DOM->new(_p($file)->slurp);
+  for my $e ($dom->at('manifest')->children->each) {
+    my $t = $e->tag;
+    if ($t eq 'include') {
 
-  while ($rdr->iterate) {
-    if ($rdr->is_start) {
-      my $path = $rdr->path;
-      my $attr = $rdr->att_hash;
+      # relative to the main manifest file
+      my $f = _p(_p($self->path)->dirname, $e->{name});
+      push @{$self->include}, $f;
 
-      if ($path eq $xpath{include}) {
-        if ($attr->{name}) {
-
-          # relative to the main manifest file
-          my $m = catfile(dirname($self->path), $attr->{name});
-          push @{$self->include}, $m;
-
-          # parse included manifest
-          $self->_parse($m);
-        }
-      }
-      elsif ($path eq $xpath{remote}) {
-        $self->add_remote($attr->{name}, $attr);
-      }
-      elsif ($path eq $xpath{default}) {
-        $self->default($attr);
-      }
-      elsif ($path eq $xpath{project}) {
-        $self->add_project($attr->{name}, $attr);
-      }
-      elsif ($path eq $xpath{'remove-project'}) {
-        $self->del_project($attr->{name});
-      }
-      else {
-        $log->debug('skip node: ' . $rdr->path);
-      }
+      # parse included manifest
+      $self->_parse($f);
     }
-    if ($rdr->is_text) {
+    elsif ($t eq 'default') {
+      $self->default($e);
     }
-
-    if ($rdr->is_end) {
+    elsif ($t eq 'remote') {
+      $self->add_remote($e->{name}, $e);
+    }
+    elsif ($t eq 'project') {
+      $self->add_project($e->{name}, $e);
+    }
+    elsif ($t eq 'remove-project') {
+      $self->del_project($e->{name});
+    }
+    else {
+      $log->debug('skip element: ' . $e);
     }
   }
 
