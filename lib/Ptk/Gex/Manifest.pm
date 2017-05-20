@@ -90,8 +90,8 @@ sub save {
 
 sub add_project {
   my $self = shift;
-  my $name = shift or die;
-  my $attr = shift or die;
+  my $name = shift or croak('no name');
+  my $attr = shift or croak('no atrr');
 
   # fix the attr if no "name"
   $attr->{name} = $name unless $attr->{name};
@@ -110,7 +110,7 @@ sub add_project {
 
 sub del_project {
   my $self = shift;
-  my $name = shift or die;
+  my $name = shift or croak('no name');
 
   my $data     = $self->_project_data;
   my $projects = $self->_projects;
@@ -128,7 +128,7 @@ sub get_project_name_by_path { $_[0]->_path_to_name->{$_[1]} }
 
 sub get_project {
   my $self = shift;
-  my $name = shift or die;
+  my $name = shift or croak('no name');
 
   my $data = $self->_project_data;
 
@@ -144,7 +144,7 @@ sub get_project {
 
 sub get_resolved_project {
   my $self = shift;
-  my $name = shift or die;
+  my $name = shift or croak('no name');
 
   my $p = $self->get_project($name);
   return $p unless $p;
@@ -195,8 +195,8 @@ sub list_project_paths {
 
 sub add_remote {
   my $self = shift;
-  my $name = shift or die;
-  my $attr = shift or die;
+  my $name = shift or croak('no name');
+  my $attr = shift or croak('no attr');
 
   # fix the attr if no "name"
   $attr->{name} = $name unless $attr->{name};
@@ -215,7 +215,7 @@ sub list_remote_names { @{shift->_remotes} }
 
 sub _parse {
   my $self = shift;
-  my $file = shift or die;
+  my $file = shift or croak('no file');
 
   my $log = $self->log;
 
