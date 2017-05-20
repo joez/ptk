@@ -1,18 +1,26 @@
-# Ptk [![Build Status](https://travis-ci.org/joez/ptk.svg?branch=master)](https://travis-ci.org/joez/ptk)
-My personal toolkit
+[![Build Status](https://travis-ci.org/joez/ptk.svg?branch=master)](https://travis-ci.org/joez/ptk)
 
-## Getting started
+# About
+
+My private toolkit
+
+# Getting started
 
 Prerequisites:
- * Network connection to install required modules
- * Bash shell
 
-Configure the environment with the command
+ * Network connection to install required modules
+ * Bash shell to setup the environment
+
+Setup the environment with the command
 
     source envsetup
 
-Enjoy yourself for the tools in `bin/`, e.g.
+Enjoy yourself, e.g.
 
+    # report all the git logs on the current branch into log.xlsx
+    gex report-log ./
+
+    # online help
     gex -h
 
-## See also
+# See also

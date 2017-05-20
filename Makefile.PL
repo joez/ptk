@@ -32,7 +32,6 @@ WriteMakefile(
     'Perl::Tidy'            => '2016',
     'Mojolicious'           => '7.0',
     'Parallel::ForkManager' => '1.12',
-    'XML::Reader'           => '0.49',
     'XML::Writer'           => '0.61',
 
     # for gex
