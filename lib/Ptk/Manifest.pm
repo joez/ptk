@@ -1,6 +1,6 @@
 # author: joe.zheng
 
-package Ptk::Gex::Manifest;
+package Ptk::Manifest;
 use Ptk::Base -base;
 use Ptk::Gex::Pattern;
 
@@ -264,14 +264,14 @@ __END__
 
 =head1 NAME
 
-Ptk::Gex::Manifest - Manifest file for repo tool
+Ptk::Manifest - Manifest file for repo tool
 
 =head1 SYNOPSIS
 
-  use Ptk::Gex::Manifest;
+  use Ptk::Manifest;
 
   # load manifest and print out the "path" of each project
-  my $m = Ptk::Gex::Manifest->new('.repo/manifests/default.xml');
+  my $m = Ptk::Manifest->new('.repo/manifests/default.xml');
   for my $n ($m->list_project_names) {
     my $r = $m->get_resolved_project($n);
     say $r->{path};

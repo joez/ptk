@@ -26,7 +26,7 @@ use Digest::MD5 qw/md5_hex/;
 
 use Ptk::Log;
 use Ptk::Chdir;
-use Ptk::Gex::Manifest;
+use Ptk::Manifest;
 use Ptk::Executor;
 
 my $log = Ptk::Log->new;
@@ -398,7 +398,7 @@ sub do_report_manifest {
     checkout_to($dir, $url, $rev);
 
     my $f = catfile($dir, $manifest);
-    my $m = Ptk::Gex::Manifest->new($f);
+    my $m = Ptk::Manifest->new($f);
     for my $n ($m->list_project_names($query)) {
       my $r = $m->get_resolved_project($n);
       my $p = $r->{path};
@@ -582,7 +582,7 @@ sub do_dump_repo {
 
   local $\ = "\n";
   for my $f (@manifests) {
-    my $m = Ptk::Gex::Manifest->new($f);
+    my $m = Ptk::Manifest->new($f);
     print $_ for sort +$m->list_project_paths($query);
   }
 }
@@ -616,7 +616,7 @@ sub do_forall {
   my $m;
   my $manifest = catfile(@opt{qw/url manifest/});
   if (-e $manifest) {
-    $m = Ptk::Gex::Manifest->new($manifest);
+    $m = Ptk::Manifest->new($manifest);
   }
   else {
     $log->warn("can't access manifest: $manifest");
@@ -919,7 +919,7 @@ sub do_dump_manifest {
 
   my $out = $opt{output} || 'manifest.xml';
 
-  my $m = Ptk::Gex::Manifest->new(shift @manifests);
+  my $m = Ptk::Manifest->new(shift @manifests);
   $m->load($_) for @manifests;
 
   $m->save($out);
@@ -936,8 +936,8 @@ sub do_overlay_manifest {
 
   my %wanted = map { ($_ => 1) } resolve_list(@_);
 
-  my $ma = Ptk::Gex::Manifest->new($this);
-  my $mb = Ptk::Gex::Manifest->new($that);
+  my $ma = Ptk::Manifest->new($this);
+  my $mb = Ptk::Manifest->new($that);
 
   local @ARGV = ($this, @{$ma->include});
   local $^I = '';
