@@ -217,21 +217,15 @@ sub _parse {
   my $self = shift;
   my $file = shift or croak('no file');
 
-  my $log = $self->log;
-
-  $log->debug("parse manifest: $file");
-  unless (-e $file) {
-    $log->warn("can't access manifest: $file");
-    return $self;
-  }
+  crock("can't access manifest: $file") unless -e $file;
 
   my $dom = Mojo::DOM->new(_p($file)->slurp);
   for my $e ($dom->at('manifest')->children->each) {
     my $t = $e->tag;
     if ($t eq 'include') {
 
-      # relative to the main manifest file
-      my $f = _p(_p($self->path)->dirname, $e->{name});
+      # relative to the folder of the root manifest
+      my $f = _p($self->path)->sibling($e->{name});
       push @{$self->include}, $f;
 
       # parse included manifest
@@ -250,7 +244,7 @@ sub _parse {
       $self->del_project($e->{name});
     }
     else {
-      $log->debug('skip element: ' . $e);
+      # skip
     }
   }
 
