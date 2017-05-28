@@ -19,7 +19,8 @@ sub _p { Mojo::File::path(@_) }
 
 has path          => '.repo/manifests/default.xml';
 has include       => sub { [] };
-has default       => sub { {} };
+has _dom          => sub { Mojo::DOM->new };
+has _default      => sub { {} };
 has _projects     => sub { [] };
 has _project_data => sub { {} };
 has _path_to_name => sub { {} };
@@ -42,9 +43,7 @@ sub load {
 
   $self->path($path)->include([]);
 
-  $self->_parse($self->path);
-
-  return $self;
+  return $self->_dom($self->_parse($path));
 }
 
 sub save {
@@ -70,7 +69,7 @@ sub save {
   }
   $wtr->characters("\n");
 
-  my $default = $self->default;
+  my $default = $self->_default;
   $wtr->emptyTag('default', map { ($_, $default->{$_}) } sort keys %$default);
   $wtr->characters("\n");
 
@@ -88,20 +87,52 @@ sub save {
   return $self;
 }
 
+sub _NE {
+  my $tag = shift or croak('no tag');
+  my $attr = shift;
+
+  my $e = Mojo::DOM->new("<$tag></$tag>")->at("$tag");
+  $e->attr($attr) if $attr;
+
+  return $e;
+}
+
+sub _AM {
+  $_[0]->at('manifest');
+}
+
 sub add_project {
   my $self = shift;
   my $name = shift or croak('no name');
   my $attr = shift or croak('no atrr');
+  my $opts = shift // {};
 
   # fix the attr if no "name"
   $attr->{name} = $name unless $attr->{name};
 
+  # insert a project element into the DOM
+  my $proj = _NE('project', $attr);
+  while (my ($k, $v) = each %$opts) {
+    my $c = _NE($k, $v);
+    $proj->append_content($c);
+  }
+  _AM($self->_dom)->append_content($proj);
+
+  return $self->_add_project($proj);
+}
+
+sub _add_project {
+  my $self = shift;
+  my $that = shift or croak('no object provided');
+
+  my $name = $that->{name};
+
   # there is no "path" defined for mirror project
-  my $path = $attr->{path} || $name;
+  my $path = $that->{path} || $name;
   my $data = $self->_project_data;
 
   push @{$self->_projects}, $name unless $data->{$name};
-  $data->{$name} = $attr;
+  $data->{$name} = $that;
 
   $self->_path_to_name->{$path} = $name;
 
@@ -109,6 +140,18 @@ sub add_project {
 }
 
 sub del_project {
+  my $self = shift;
+  my $name = shift or croak('no name');
+
+  # remove project element from the DOM
+  my $q = join ', ',
+    map {"$_\[name=$name]"} qw/project remove-project extend-project/;
+  $self->_dom->find($q)->map('remove');
+
+  return $self->_del_project($name);
+}
+
+sub _del_project {
   my $self = shift;
   my $name = shift or croak('no name');
 
@@ -154,7 +197,7 @@ sub get_resolved_project {
 
   my $resolved = $self->stash('resolved_projects') || {};
   unless ($resolved->{$name}) {
-    my $d = $self->default;
+    my $d = $self->_default;
     my $n = $p->{remote} || $d->{remote};
     my $r = $self->get_remote($n);
     my $t = {%$d, %$r, %$p};
@@ -201,10 +244,22 @@ sub add_remote {
   # fix the attr if no "name"
   $attr->{name} = $name unless $attr->{name};
 
+  # insert a remote element into the DOM
+  my $remote = _NE('remote', $attr);
+  _AM($self->_dom)->append_content($remote);
+
+  return $self->_add_remote($remote);
+}
+
+sub _add_remote {
+  my $self = shift;
+  my $that = shift or croak('no object provided');
+
+  my $name = $that->{name};
   my $data = $self->_remote_data;
 
   push @{$self->_remotes}, $name unless $data->{$name};
-  $data->{$name} = $attr;
+  $data->{$name} = $that;
 
   return $self;
 }
@@ -220,7 +275,7 @@ sub _parse {
   crock("can't access manifest: $file") unless -e $file;
 
   my $dom = Mojo::DOM->new(_p($file)->slurp);
-  for my $e ($dom->at('manifest')->children->each) {
+  for my $e (_AM($dom)->children->each) {
     my $t = $e->tag;
     if ($t eq 'include') {
 
@@ -229,26 +284,29 @@ sub _parse {
       push @{$self->include}, $f;
 
       # parse included manifest
-      $self->_parse($f);
+      my $d = $self->_parse($f);
+
+      # and append the parsed manifest
+      $e->append_content($d);
     }
     elsif ($t eq 'default') {
-      $self->default($e);
+      $self->_default($e);
     }
     elsif ($t eq 'remote') {
-      $self->add_remote($e->{name}, $e);
+      $self->_add_remote($e);
     }
     elsif ($t eq 'project') {
-      $self->add_project($e->{name}, $e);
+      $self->_add_project($e);
     }
     elsif ($t eq 'remove-project') {
-      $self->del_project($e->{name});
+      $self->_del_project($e->{name});
     }
     else {
       # skip
     }
   }
 
-  return $self;
+  return $dom;
 }
 
 1;

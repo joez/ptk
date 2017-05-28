@@ -52,6 +52,7 @@ is $m->get_remote('remote.add')->{name}, 'remote.add', 'add remote';
 # delete project
 $m->del_project('project1');
 ok !$m->get_project('project1'), 'del project';
+ok $m->get_project('project2'), 'get project';
 
 # add project
 $m->add_project('project.add', {remote => 'remote2'});
