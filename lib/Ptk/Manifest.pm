@@ -200,7 +200,10 @@ sub get_resolved_project {
     my $d = $self->_default;
     my $n = $p->{remote} || $d->{remote};
     my $r = $self->get_remote($n);
-    my $t = {%$d, %$r, %$p};
+    my $m = {%$d, %$r, %$p};
+
+    # clone the project and resolve the attributes
+    my $t = Mojo::DOM->new($p)->at("project")->attr($m);
 
     # there is no "path" defined for mirror project
     $t->{path} = $t->{name} unless $t->{path};
