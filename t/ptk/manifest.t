@@ -24,10 +24,10 @@ can_ok 'Ptk::Manifest', @public;
 my $m = Ptk::Manifest->new($path);
 
 # Normal usage
-is_deeply [$m->list_project_names], [qw/copyfile linkfile project1 project2/],
-  'list project names';
-is_deeply [$m->list_project_paths], [qw/copyfile linkfile project1 modified/],
-  'list project paths';
+is_deeply [$m->list_project_names],
+  [qw/copyfile linkfile annotation project1 project2/], 'list project names';
+is_deeply [$m->list_project_paths],
+  [qw/copyfile linkfile annotation project1 modified/], 'list project paths';
 is_deeply [$m->list_remote_names], [qw/remote1 remote2/], 'list remote names';
 ok $m->get_project('project1'), 'get project';
 ok !$m->get_project('invalid-project'), 'get invalid project';
@@ -44,6 +44,27 @@ is $m->get_resolved_project('modified')->{fetch},
   'https://source.remote1.org', 'get resolved project fetch';
 is $m->get_resolved_project('modified')->{revision}, 'develop',
   'get resolved project revision';
+
+for ($m->get_project('copyfile')->at('copyfile')) {
+  is $_->{src},  'copyfile/src',  'copyfile attribute';
+  is $_->{dest}, 'copyfile/dest', 'copyfile attribute';
+}
+for ($m->get_project('linkfile')->at('linkfile')) {
+  is $_->{src},  'linkfile/src',  'linkfile attribute';
+  is $_->{dest}, 'linkfile/dest', 'linkfile attribute';
+}
+for ($m->get_project('annotation')->at('annotation[name=annotation1]')) {
+  is $_->{name},  'annotation1', 'annotation name';
+  is $_->{value}, 'value1',      'annotation value';
+  ok !exists $_->{keep}, 'annotation keep';
+}
+for (
+  $m->get_resolved_project('annotation')->at('annotation[name=annotation2]'))
+{
+  is $_->{name},  'annotation2', 'annotation name';
+  is $_->{value}, 'value2',      'annotation value';
+  is $_->{keep},  'true',        'annotation keep';
+}
 
 # add remote will fix missing name field
 $m->add_remote('remote.add', {});

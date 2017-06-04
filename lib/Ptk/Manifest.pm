@@ -46,11 +46,24 @@ sub load {
   return $self->_dom($self->_parse($path));
 }
 
-sub save {
+sub save { shift->save_unified(@_) }
+
+sub save_unified {
   my $self = shift;
   my $path = shift // $self->path;
 
-  # TODO
+  # handy subs
+  # get sorted attributes
+  my $SA = sub {
+    map { ($_, $_[0]->{$_}) } sort keys %{$_[0]};
+  };
+
+  # generate sort sub by an attribute
+  my $GS = sub {
+    my $n = $_[0];
+    return sub { $a->{$n} cmp $b->{$n} };
+  };
+
   my $out = _p($path)->open('w');
   my $wtr = XML::Writer->new(
     OUTPUT      => $out,
@@ -59,30 +72,40 @@ sub save {
     DATA_MODE   => 1,
     DATA_INDENT => 4,
   );
-  $wtr->xmlDecl();
+  $wtr->xmlDecl;
   $wtr->startTag('manifest');
 
   for my $n (sort +$self->list_remote_names) {
     my $item = $self->get_remote($n);
-    my @attr = map { ($_, $item->{$_}) } sort keys %$item;
-    $wtr->emptyTag('remote', @attr);
+    $wtr->emptyTag('remote', $SA->($item));
   }
   $wtr->characters("\n");
 
   my $default = $self->_default;
-  $wtr->emptyTag('default', map { ($_, $default->{$_}) } sort keys %$default);
+  $wtr->emptyTag('default', $SA->($default));
   $wtr->characters("\n");
 
+  my %tags_sort_by
+    = (annotation => 'name', copyfile => 'src', linkfile => 'src',);
   for my $n (sort +$self->list_project_names) {
     my $item = $self->get_project($n);
-    my @attr = map { ($_, $item->{$_}) } sort keys %$item;
-    $wtr->emptyTag('project', @attr);
+    $wtr->emptyTag('project', $SA->($item)) and next
+      unless $item->children->size;
+
+    $wtr->startTag('project', $SA->($item));
+    for my $t (sort keys %tags_sort_by) {
+      $item->find($t)->sort($GS->($tags_sort_by{$t}))->each(
+        sub {
+          $wtr->emptyTag($t, $SA->($_));
+        }
+      );
+    }
+    $wtr->endTag;
   }
 
-  $wtr->endTag('manifest');
-  $wtr->end();
-
-  $out->close();
+  $wtr->endTag;
+  $wtr->end;
+  $out->close;
 
   return $self;
 }
