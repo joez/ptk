@@ -1,0 +1,40 @@
+0.2 2017-06-05
+
+0.1 2017-04-25
+- improve project support in Ptk::Manifest
+- keep resolved project as a DOM object
+- upgrade ack to 2.18
+- keep original DOM in Ptk::Manifest
+- crock if fail to parse manifest
+- give an example of gex usage
+- rename Ptk::Gex::Manifest to Ptk::Manifest
+- use crock instead of die
+- remove XML::Reader dependency
+- improve tests for Ptk::Executor
+- gex: remove un-necessary modules
+- gex: prefer XML::Parser
+- update README
+- move previous WA to envsetup
+- WA for Perl <= 5.014
+- no explict requirement for XML::Parsepp
+- add travis ci configuration
+- add test for Ptk::Gex::Manifest
+- add doc and test for Ptk::Executor
+- correct doc for Ptk::Chdir
+- add doc and test for Ptk::Chdir
+- add doc for Ptk::Pattern and Ptk::Gex::Pattern
+- fix test because of Ptk::Base::* rename
+- patch Mojo::Base in Ptk::Base
+- rename Ptk::Matcher to Ptk::Pattern
+- exclude ext/ and bin/cpanm from the manifest
+- add doc for Ptk::Log
+- sync with Mojo::Log
+- refactoring for Ptk::Base
+- enhance doc for Ptk::Gex::Manifest
+- refactoring for Ptk::Base::Loader
+- add doc for Ptk::Gex::Manifest and a minor fix
+- mark update done only when really finished
+- remove old external modules
+- install external modules on demand by cpanm
+- update .gitignore
+- to be a Perl module
