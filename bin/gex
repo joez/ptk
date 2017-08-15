@@ -65,24 +65,24 @@ DESCRIPTION
 
 COMMAND
     $script report-log [-r <root>] [-o <output>] [-q <query>] [-j <jobs>]
-    [<src>...]
+    [-c <config>] [<src>...]
       export Git log into spreadsheet
-      <query>:  the parameters passed to "git log"
-      <output>: spreadsheet file path, default "log.xlsx"
-      <src>:    relative git repo paths
+      <query>:    the parameters passed to "git log"
+      <output>:   spreadsheet file path, default "log.xlsx"
+      <src>:      relative git repo paths
 
     $script report-delta [-r <root>] [-o <output>] [-b <base>] [-j <jobs>]
-    <this> <that> [<src>...]
+    [-c <config>] <this> <that> [<src>...]
       export commit list need to be integrated from <that> to <this>
       as an spreadsheet
-      <output>: spreadsheet file path, default "delta.xlsx"
-      <base>:   up to and including <base> are not reported on <that>
-      <this>:   working branch
-      <that>:   remote branch, mostly upstream
-      <src>:    relative Git repo paths
+      <output>:   spreadsheet file path, default "delta.xlsx"
+      <base>:     up to and including <base> are not reported on <that>
+      <this>:     working branch
+      <that>:     remote branch, mostly upstream
+      <src>:      relative Git repo paths
 
     $script report-manifest [-u <url>] [-m <manifest>] [-o <output>]
-    [-j <jobs>] [-q <query>] [<src>...]
+    [-c <config>] [-j <jobs>] [-q <query>] [<src>...]
       export manifest information into spreadsheet
       <query>:    same as in "dump-repo"
       <output>:   spreadsheet file path, default "manifest.xlsx"
@@ -129,18 +129,18 @@ COMMAND
     $script match-cherry [-r <root>] [-j <jobs>] <this> <that> [<src>...]
       find out all the original and picked cherries with the same changeset
       (with same patch id), but different commit ids between two branches
-      <this>: working branch
-      <that>: remote branch, mostly upstream
-      <src>:  relative Git repo paths
+      <this>:    working branch
+      <that>:    remote branch, mostly upstream
+      <src>:     relative Git repo paths
 
     $script overlay-manifest [-f <field>] <this> <that> [<src>...]
       overlay each Git repo's fields defined in <this> manifest by
       one defined in <that> manifest, generally <that> manifest is a
       snapshot, by this way to pin some Git repo in a stable revision
-      <field>: fields to apply, joined by ",", default is "revision"
-      <this>:  the target manifest
-      <that>:  the snapshot manifest to be applied
-      <src>:   the Git repo paths or names
+      <field>:   fields to apply, joined by ",", default is "revision"
+      <this>:    the target manifest
+      <that>:    the snapshot manifest to be applied
+      <src>:     the Git repo paths or names
 
     $script dump-manifest [-o <output>] [<src>...]
       load all the provided manifests sequencially and dump to the output
@@ -150,16 +150,16 @@ COMMAND
     $script find-repo [<src>...]
       find valid Git repo in the <src> directories and output the paths,
       it can be used to get the Git repo path list for later usage
-      <src>: directories to search, default is "."
+      <src>:     directories to search, default is "."
 
     $script dump-repo [-q <query>] [<src>...]
       dump the Git repo paths in the given manifests
-      <query>: dump repo matching the query only, the query format is
+      <query>:   dump repo matching the query only, the query format is
         queries separated by ',', each query is a key-value pair
         separeated by ':', the key is the attribute of the repo definition
         and the value is a regex to match. e.g. "revision:master"
         prefix with '!' for negative match, e.g. "!group:aosp,path:vendor"
-      <src>:   manifests to dump, default is ".repo/manifests/default.xml"
+      <src>:     manifests to dump, default is ".repo/manifests/default.xml"
 
 OPTIONS
 
@@ -181,6 +181,12 @@ OPTIONS
 
     -o, --output
       the output file path
+
+    -c --config
+      configuration file for the report command, it is a perl script returns
+      a subroutine with args (key, value, field), it will be invoked to get
+      the config item for the report, e.g. \$cb->('repo', 'bionic', 'owner')
+      to get the "Owner" of the "bionic" repo
 
     <src>
       the source files or directories
@@ -207,7 +213,7 @@ EXAMPLES
     6. $script report-log -j 4 -q 'develop..upstream' repo-list.txt
       export the commits between "develop" and "upsteam" branches,
       for the Git repos in the "repo-list.txt", and export to "log.xlsx"
-	  with maximal concurrent 4 jobs
+	    with maximal concurrent 4 jobs
 
     7. $script clone repo-list.txt
       clone the Git repos in "repo-list.txt" from remote server defined
@@ -223,10 +229,10 @@ EXAMPLES
       find all the commit with same changeset but different commit id,
       between "develop" and "upstream" of Git repos in "repo-list.txt"
 
-    11. $script report-delta develop upstream repo-list.txt
+    11. $script report-delta -c report.cfg develop upstream repo-list.txt
       export all the commit list only exist in the "upstream" branch of
       Git repos in "repo-list.txt" into "delta.xlsx", these commits
-      need to be cherry-picked
+      need to be cherry-picked, "report.cfg" is used for the report
 
     12. $script format-patch -j 4 -q BASE..HEAD repo-list.txt
       format-patch from BASE to HEAD for each repo in repo-list.txt,
@@ -268,6 +274,7 @@ my %opt = (
   manifest => 'default.xml',
   jobs     => 2,
   output   => '',
+  config   => 'report.cfg',
   command  => '',
   path     => 0,
 );
@@ -284,6 +291,7 @@ GetOptions(
   "jobs|j=i"     => \$opt{jobs},
   "command|c=s"  => \$opt{command},
   "output|o=s"   => \$opt{output},
+  "config|c=s"   => \$opt{config},
   "path"         => \$opt{path},
 ) or usage();
 
@@ -317,6 +325,25 @@ else {
 
 # subs
 
+sub resolve_config {
+  my $path = shift or die;
+
+  if ($path && -e $path) {
+    unless (my $return = do $path) {
+      warn "couldn't parse $path: $@" if $@;
+      warn "couldn't do $path: $!" unless defined $return;
+      warn "couldn't run $path" unless $return;
+    }
+    elsif (ref $return eq 'CODE') {
+      return $return;
+    }
+    else {
+      warn "wrong configuration, need to return a subroutine";
+    }
+  }
+
+  return undef;
+}
 
 sub resolve_list {
   my @list;
@@ -606,8 +633,9 @@ sub get_local_rev {
 }
 
 sub do_clone {
-  $opt{path}    = 1;
-  $opt{command} = 'git clone -o $REPO_REMOTE -b $REPO_RREV $REPO_FETCH/$REPO_PROJECT .';
+  $opt{path} = 1;
+  $opt{command}
+    = 'git clone -o $REPO_REMOTE -b $REPO_RREV $REPO_FETCH/$REPO_PROJECT .';
 
   do_forall(@ARGV);
 }
@@ -1141,6 +1169,7 @@ sub do_report_log {
   my $dst = $opt{output} || 'log.xlsx';
 
   my @repos = resolve_list(@_);
+  my $cb    = resolve_config($opt{config});
 
   my $db = {};
   $db->{meta}{refs}{query} = $opt{query};
@@ -1185,7 +1214,7 @@ sub do_report_log {
     on_finish => $on_finish,
   )->execute(@repos);
 
-  db_to_xls($dst, $db);
+  db_to_xls($dst, $db, $cb);
 }
 
 sub do_report_delta {
@@ -1193,6 +1222,7 @@ sub do_report_delta {
   my $that = shift or usage();
 
   my @repos = resolve_list(@_);
+  my $cb    = resolve_config($opt{config});
   my $base  = $opt{base};
   my $dst   = $opt{output} || 'delta.xlsx';
 
@@ -1241,7 +1271,7 @@ sub do_report_delta {
     on_finish => $on_finish,
   )->execute(@repos);
 
-  db_to_xls($dst, $db);
+  db_to_xls($dst, $db, $cb);
 }
 
 sub parse_repo_log {
@@ -1454,6 +1484,7 @@ sub format_date {
 sub db_to_xls {
   my $dst = shift or die;
   my $db  = shift or die;
+  my $cb  = shift;
 
   my @sheets     = qw/data summary file ticket reviewer match repo meta/;
   my %sheet_name = map { ($_, $_) } @sheets;
@@ -1639,8 +1670,12 @@ sub db_to_xls {
 
     # only list non-empty ones
     my @repos = sort grep { @{$db->{data}{$_}{id}} > 0 } keys %{$db->{data}};
-    $worksheet->write_col($row, $col++, \@repos);
-    $row = 1 + @repos;
+    foreach my $repo (@repos) {
+      my @l = map { $cb ? $cb->('repo', $repo, lc $_) // '' : '' }
+        @head[1 .. $#head];
+      unshift @l, $repo;
+      eval { $worksheet->write_row($row++, 0, \@l) };
+    }
     $NEW_TABLE->();
   }
 
