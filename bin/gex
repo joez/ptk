@@ -1577,7 +1577,7 @@ sub db_to_xls {
     };
     for my $k (keys %$fi) {
       my ($f, $t, $i) = @{$fi->{$k}};
-      my $formula = "=VLOOKUP([[#This Row],[$f]],$t,$i,FALSE)";
+      my $formula = "=VLOOKUP([[#This Row],[$f]],$t\[],$i,FALSE)";
 
       $worksheet->write($_, $head_idx{$k}, $formula) for (1 .. $row - 1);
     }
