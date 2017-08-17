@@ -184,9 +184,9 @@ OPTIONS
 
     -c --config
       configuration file for the report command, it is a perl script returns
-      a subroutine with args (key, value, field), it will be invoked to get
-      the config item for the report, e.g. \$cb->('repo', 'bionic', 'owner')
-      to get the "Owner" of the "bionic" repo
+      a subroutine with args (table, field[, key]), it will be invoked to get
+      the config items for the report, e.g. \$cb->(repo => 'owner', 'bionic')
+      to get the "Owner" of the repo named "bionic"
 
     <src>
       the source files or directories
@@ -417,6 +417,7 @@ sub do_report_manifest {
   my $url      = $opt{url};
   my $manifest = $opt{manifest};
   my $query    = $opt{query};
+  my $cb       = resolve_config($opt{config});
 
   my $db = {};
   $db->{meta}{$_} = {} for qw/path remote fetch review revs/;
@@ -451,12 +452,13 @@ sub do_report_manifest {
     }
   }
 
-  repo_to_xls($dst, $db);
+  repo_to_xls($dst, $db, $cb);
 }
 
 sub repo_to_xls {
   my $dst = shift or die;
   my $db  = shift or die;
+  my $cb  = shift;
 
   my @revs       = sort keys %{$db->{meta}{revs}};
   my @sheets     = (@revs, qw/summary revision meta/);
@@ -558,8 +560,10 @@ sub repo_to_xls {
 
     my %defs = (
       map({ $_, [] } @head),
-      Status     => [sort qw/Todo Doing Done Redo Defer Ignore/],
-      Priorities => [sort qw/Low Normal High/],
+      Status => $cb && $cb->(status => 'status')
+        // [sort qw/Todo Doing Done Redo Defer Ignore/],
+      Priorities => $cb && $cb->(priority => 'priority')
+        // [sort qw/Low Normal High/],
     );
 
     $defs{Repos}   = [sort keys %{$db->{meta}{path}}];
@@ -1676,7 +1680,7 @@ sub db_to_xls {
     # only list non-empty ones
     my @repos = sort grep { @{$db->{data}{$_}{id}} > 0 } keys %{$db->{data}};
     foreach my $repo (@repos) {
-      my @l = map { $cb ? $cb->('repo', $repo, lc $_) // '' : '' }
+      my @l = map { $cb ? $cb->(repo => lc $_, $repo) // '' : '' }
         @head[1 .. $#head];
       unshift @l, $repo;
       eval { $worksheet->write_row($row++, 0, \@l) };
@@ -1695,7 +1699,7 @@ sub db_to_xls {
       my %r = ('Email' => $k, 'Name' => $author_email{$k});
       for my $f (@head[1 .. $#head]) {
         if ($cb) {
-          my $v = $cb->('email', $k, lc $f);
+          my $v = $cb->(email => lc $f, $k);
           $r{$f} = $v if defined $v;
         }
         $r{$f} //= '';
@@ -1713,9 +1717,12 @@ sub db_to_xls {
 
     my %defs = (
       map({ $_, [] } @head),
-      Types      => [sort qw/Defect Feature Enhance Spec Custom Other/],
-      Status     => [sort qw/Todo Doing Done Redo Defer Ignore/],
-      Priorities => [sort qw/Low Normal High/],
+      Types => $cb && $cb->(type => 'type')
+        // [sort qw/Defect Feature Enhance Spec Custom Other/],
+      Status => $cb && $cb->(status => 'status')
+        // [sort qw/Todo Doing Done Redo Defer Ignore/],
+      Priorities => $cb && $cb->(priority => 'priority')
+        // [sort qw/Low Normal High/],
     );
 
     for my $k (sort keys %{$db->{meta}{refs}}) {
