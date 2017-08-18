@@ -496,12 +496,6 @@ sub repo_to_xls {
     @fields{@info} = @info;
     $fields{Path} = 'path';
 
-    my %head_idx;
-    {
-      my $i;
-      %head_idx = map +($_, $i++), @head;
-    }
-
     $NEW_SHEET->();
 
     for my $p (sort keys %{$db->{meta}{path}}) {
@@ -527,11 +521,6 @@ sub repo_to_xls {
       @width = (40, 30, 30, 30, 30, 20, 20);
       my %fields;
       @fields{@info} = qw/path revision name fetch review groups/;
-      my %head_idx;
-      {
-        my $i;
-        %head_idx = map +($_, $i++), @head;
-      }
 
       $NEW_SHEET->();
 
@@ -1493,20 +1482,23 @@ sub db_to_xls {
   my %author_email;
   my %id_ticket;
   my %id_reviewer;
+  my %timeline;
   my $name_match = 'MatchedCherries';
 
   my $workbook = Excel::Writer::XLSX->new($dst);
   my $bold     = $workbook->add_format(bold => 1, align => 'center');
   my $green    = $workbook->add_format(bg_color => '#A4D050');
+  my $style    = 'Table Style Light 1';
   my ($sheet, $worksheet);
   my ($row,   $col);
-  my (@head,  @width);
+  my (@head,  @width, %head_idx);
 
   my $SN = sub { correct_sheet_name($sheet_name{$_[0]}) };
   my $TN = sub { 'Tb' . correct_var_name($SN->($_[0])) };
   my $NEW_SHEET = sub {
+    %head_idx = map +($head[$_], $_), 0 .. $#head;
     ($row, $col) = (0, 0);
-    $worksheet = $workbook->add_worksheet($SN->($sheet));
+    $worksheet = shift || $workbook->add_worksheet($SN->($sheet));
     $worksheet->freeze_panes(1, 0);
     $worksheet->set_column($_, $_, $width[$_]) for 0 .. $#width;
     $worksheet->write_row($row++, 0, \@head, $bold);
@@ -1515,9 +1507,17 @@ sub db_to_xls {
     my $n = $TN->($sheet);
     my @c = map { +{header => $_} } @head;
 
-    $worksheet->add_table(0, 0, $row > 1 ? $row - 1 : 1,
-      $#head, {style => 'Table Style Light 1', columns => \@c, name => $n,});
+    $worksheet->add_table(0, 0, $row > 1 ? $row : 2,
+      $#head, {style => $style, columns => \@c, name => $n, total_row => 1});
   };
+
+  # 0 based index to excel range
+  # ($sheetname, $row1, $row2, $col1, $col2)
+  my $CHART_RANGE = sub { xl_range_formula($SN->($sheet), @_) };
+  my $CHART_HEAD
+    = sub { my $col = $head_idx{+shift}; $CHART_RANGE->(0, 0, $col, $col) };
+  my $CHART_FIELD
+    = sub { my $col = $head_idx{+shift}; $CHART_RANGE->(1, $row, $col, $col) };
 
   my $NEED = sub { $sheet_need{+shift} };
 
@@ -1529,11 +1529,6 @@ sub db_to_xls {
     my %fields;
     @fields{@info}
       = qw/commit author_name author_email subject repo committer_name committer_time request_id topic/;
-    my %head_idx;
-    {
-      my $i;
-      %head_idx = map +($_, $i++), @head;
-    }
 
     $NEW_SHEET->();
 
@@ -1551,7 +1546,11 @@ sub db_to_xls {
           $id_reviewer{$l}++;
         }
 
-        $d{committer_time} = format_date($d{committer_time});
+        for (format_date($d{committer_time})) {
+          $d{committer_time} = $_;
+          $timeline{$_}++;
+        }
+
         my @l = @d{@fields{@info}};
         eval { $worksheet->write_row($row++, 0, \@l) };
       }
@@ -1581,7 +1580,8 @@ sub db_to_xls {
     };
     for my $k (keys %$fi) {
       my ($f, $t, $i) = @{$fi->{$k}};
-      my $formula = "=VLOOKUP([[#This Row],[$f]],$t\[],$i,FALSE)";
+      my $formula
+        = qq/=IFERROR(VLOOKUP([[#This Row],[$f]],$t\[],$i,FALSE),"Other")/;
 
       $worksheet->write($_, $head_idx{$k}, $formula) for (1 .. $row - 1);
     }
@@ -1589,7 +1589,50 @@ sub db_to_xls {
 
   # "summary" worksheet
   if ($NEED->($sheet = "summary")) {
-    $worksheet = $workbook->add_worksheet($SN->($sheet));
+    my $key = 'Date';
+    my $team = $cb && $cb->(email => 'team') // [];
+    push @$team, 'Other';
+    $team = [sort keys %{{map { $_ => 1 } @$team}}];
+
+    @head = ($key, @$team);
+    @width = (10) x @head;
+
+    $NEW_SHEET->();
+
+    my $td = $TN->('data');
+    my $ts = $TN->('summary');
+
+    # CAUTION: "Team" filed is hardcoded
+    my %v = map {
+      $_,
+        "=COUNTIFS($td\[$key],[[#This Row],[$key]],$td\[Team],$ts\[[#Headers],[$_]])"
+    } @$team;
+
+    for my $t (sort keys %timeline) {
+      my %d = ($key => $t, %v);
+      eval { $worksheet->write_row($row++, 0, [@d{@head}]) };
+    }
+
+    $NEW_TABLE->();
+
+    my $chart = $workbook->add_chart(
+      type     => 'column',
+      subtype  => 'stacked',
+      embedded => 1
+    );
+    $chart->set_title(name => 'COMMITS by TEAMS');
+    $chart->set_size(x_scale => 2, y_scale => 1.5);
+    $chart->set_legend(position => 'bottom');
+
+    for my $team (@$team) {
+      $chart->add_series(
+        categories => $CHART_FIELD->($key),
+        values     => $CHART_FIELD->($team),
+        name       => $CHART_HEAD->($team),
+      );
+    }
+
+    $worksheet->insert_chart(2, @head + 1, $chart);
   }
 
   # "file" worksheet
