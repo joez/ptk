@@ -3,7 +3,7 @@
 package Ptk;
 use Ptk::Base -base;
 
-our $VERSION  = '0.3';
+our $VERSION  = '0.4';
 
 1;
 __END__
