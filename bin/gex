@@ -1494,6 +1494,7 @@ sub db_to_xls {
   my %id_reviewer;
   my %timeline;
   my $name_match = 'MatchedCherries';
+  my $undefined  = 'Other';
 
   my $workbook = Excel::Writer::XLSX->new($dst);
   my $bold     = $workbook->add_format(bold => 1, align => 'center');
@@ -1591,7 +1592,7 @@ sub db_to_xls {
     for my $k (keys %$fi) {
       my ($f, $t, $i) = @{$fi->{$k}};
       my $formula
-        = qq/=IFERROR(VLOOKUP([[#This Row],[$f]],$t\[],$i,FALSE),"Other")/;
+        = qq/=IFERROR(VLOOKUP([[#This Row],[$f]],$t\[],$i,FALSE),"$undefined")/;
 
       $worksheet->write($_, $head_idx{$k}, $formula) for (1 .. $row - 1);
     }
@@ -1601,7 +1602,7 @@ sub db_to_xls {
   if ($NEED->($sheet = "summary")) {
     my $key = 'Date';
     my $team = $cb && $cb->(email => 'team') // [];
-    push @$team, 'Other';
+    push @$team, $undefined;
     $team = [sort keys %{{map { $_ => 1 } @$team}}];
 
     @head = ($key, @$team);
@@ -1610,12 +1611,10 @@ sub db_to_xls {
     $NEW_SHEET->();
 
     my $td = $TN->('data');
-    my $ts = $TN->('summary');
 
     # CAUTION: "Team" filed is hardcoded
     my %v = map {
-      $_,
-        "=COUNTIFS($td\[$key],[[#This Row],[$key]],$td\[Team],$ts\[[#Headers],[$_]])"
+      $_, qq/=COUNTIFS($td\[$key],[[#This Row],[$key]],$td\[Team],"$_")/
     } @$team;
 
     for my $t (sort keys %timeline) {
@@ -1727,7 +1726,7 @@ sub db_to_xls {
     # only list non-empty ones
     my @repos = sort grep { @{$db->{data}{$_}{id}} > 0 } keys %{$db->{data}};
     foreach my $repo (@repos) {
-      my @l = map { $cb ? $cb->(repo => lc $_, $repo) // '' : '' }
+      my @l = map { $cb && $cb->(repo => lc $_, $repo) // $undefined }
         @head[1 .. $#head];
       unshift @l, $repo;
       eval { $worksheet->write_row($row++, 0, \@l) };
@@ -1738,7 +1737,7 @@ sub db_to_xls {
   # "email" worksheet
   if ($NEED->($sheet = "email")) {
     @head = (qw/Email Name Team/);
-    @width = (30, 10, 10);
+    @width = (30, 18, 10);
 
     $NEW_SHEET->();
 
@@ -1749,7 +1748,7 @@ sub db_to_xls {
           my $v = $cb->(email => lc $f, $k);
           $r{$f} = $v if defined $v;
         }
-        $r{$f} //= '';
+        $r{$f} //= $undefined;
       }
       my @l = @r{@head};
       eval { $worksheet->write_row($row++, 0, \@l) };
