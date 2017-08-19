@@ -1,10 +1,25 @@
-# ptk
-My personal toolkit
+[![Build Status](https://travis-ci.org/joez/ptk.svg?branch=old)](https://travis-ci.org/joez/ptk)
 
-## Setup
-In bash shell, source the `envsetup`
+# About
 
-`source ptk/envsetup`
+My private toolkit
 
-## Enjoy yourself
-Then you can enjoy my personal tools in `ptk/bin`
+# Getting started
+
+Prerequisites:
+
+ * Bash shell to setup the environment
+
+Setup the environment with the command
+
+    source envsetup
+
+Enjoy yourself, e.g.
+
+    # report all the git logs on the current branch into log.xlsx
+    gex report-log ./
+
+    # online help
+    gex -h
+
+# See also
