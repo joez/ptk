@@ -9,3 +9,5 @@ perl:
   - "5.10"
 install:
   - source envsetup
+script:
+  - gex -h
