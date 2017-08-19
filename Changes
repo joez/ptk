@@ -1,6 +1,12 @@
-0.2 2017-06-05
+0.3 2017-06-05
+- gex: set the undefined value as 'Other' in the report
+- gex: add chart for report
+- gex: improve configuration api for report
+- gex: fix "#NAME?" error in the report
+- gex: add email worksheet for report
+- gex: add configuration support for report command
 
-0.1 2017-04-25
+0.2 2017-04-25
 - improve project support in Ptk::Manifest
 - keep resolved project as a DOM object
 - upgrade ack to 2.18
@@ -38,3 +44,8 @@
 - install external modules on demand by cpanm
 - update .gitignore
 - to be a Perl module
+
+0.1 2014-11-18
+- fix envsetup can't work in macOS
+...
+- init: personal toolkit
