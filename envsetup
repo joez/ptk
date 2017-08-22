@@ -62,16 +62,21 @@ else
     export PTK_LOG_LEVEL=info
 
     # deploy the cpanm if not exist
+    echo "check cpanm"
     if [[ ! -f $PTK_CPANM ]]; then
+        echo "not ready, update cpanm..."
         ptk_update_cpanm
     fi
 
     # deploy the ext if not exist or hasn't been fully updated
+    echo "check ext"
     if [[ ! -d $PTK_EXT || ! -f $PTK_EXT/.updated ]]; then
+        echo "not ready, update ext..."
         ptk_update_ext
     fi
 
     # setup the local lib
+    echo "set up local::lib"
     eval "$(perl -I$PTK_EXT/lib/perl5 -Mlocal::lib=$PTK_EXT)"
 
     if [[ ! $PATH =~ $PTK_BIN: ]]; then
