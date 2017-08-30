@@ -1,7 +1,7 @@
 .*
 *~
+*.bak
 !.gitignore
-!.dockerignore
 !.perltidyrc
 !.travis.yml
 /blib

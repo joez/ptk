@@ -1479,6 +1479,13 @@ sub db_to_xls {
 
   $sheet_need{match} = exists $db->{match};
 
+  my @charts = qw/team-activity repo-activity user-activity/;
+  my $chart_wanted = $cb && $cb->(chart => 'chart') // \@charts;
+  for my $c (@$chart_wanted) {
+    $sheet_name{$c} = $c;
+    $sheet_need{$c} = 1;
+  }
+
   my %author_email;
   my %id_ticket;
   my %id_reviewer;
@@ -1590,6 +1597,11 @@ sub db_to_xls {
 
   # "summary" worksheet
   if ($NEED->($sheet = "summary")) {
+    $workbook->add_worksheet($SN->($sheet));
+  }
+
+  # "team-activity" worksheet
+  if ($NEED->($sheet = "team-activity")) {
     my $key = 'Date';
     my $team = $cb && $cb->(email => 'team') // [];
     push @$team, $undefined;
@@ -1609,7 +1621,7 @@ sub db_to_xls {
 
     for my $t (sort keys %timeline) {
       my %d = ($key => $t, %v);
-      eval { $worksheet->write_row($row++, 0, [@d{@head}]) };
+      $worksheet->write_row($row++, 0, [@d{@head}]);
     }
 
     $NEW_TABLE->();
@@ -1630,6 +1642,73 @@ sub db_to_xls {
         name       => $CHART_HEAD->($team),
       );
     }
+
+    $worksheet->insert_chart(2, @head + 1, $chart);
+  }
+
+  # "repo-activity" worksheet
+  if ($NEED->($sheet = "repo-activity")) {
+    my ($key, $val) = qw/Repo Commits/;
+    @head = ($key, $val);
+    @width = (40, 10);
+
+    $NEW_SHEET->();
+
+    my $td      = $TN->('data');
+    my $formula = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
+
+    # only list non-empty ones
+    $worksheet->write_row($row++, 0, [$_, $formula])
+      for sort grep { @{$db->{data}{$_}{id}} > 0 } keys %{$db->{data}};
+
+    $NEW_TABLE->();
+
+    my $chart = $workbook->add_chart(type => 'bar', embedded => 1);
+    $chart->set_title(name => 'COMMITS by REPOS');
+    $chart->set_size(x_scale => 1.5, y_scale => 2);
+    $chart->set_legend(position => 'none');
+
+    $chart->add_series(
+      categories => $CHART_FIELD->($key),
+      values     => $CHART_FIELD->($val),
+      name       => $CHART_HEAD->($val),
+    );
+
+    $worksheet->insert_chart(2, @head + 1, $chart);
+  }
+
+
+  # "user-activity" worksheet
+  if ($NEED->($sheet = "user-activity")) {
+    my ($key, $name, $val) = qw/Email Name Commits/;
+    @head = ($key, $name, $val);
+    @width = (30, 18, 10);
+
+    $NEW_SHEET->();
+
+    # CAUTION: hardcoded
+    my $td = $TN->('data');
+    my $te = $TN->('email');
+    my $fv = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
+    my $fn
+      = qq/=IFERROR(VLOOKUP([[#This Row],[$key]],$te\[],2,FALSE),"$undefined")/;
+
+    # only list non-empty ones
+    $worksheet->write_row($row++, 0, [$_, $fn, $fv])
+      for sort keys %author_email;
+
+    $NEW_TABLE->();
+
+    my $chart = $workbook->add_chart(type => 'bar', embedded => 1);
+    $chart->set_title(name => 'COMMITS by AUTHORS');
+    $chart->set_size(x_scale => 1.5, y_scale => 2);
+    $chart->set_legend(position => 'none');
+
+    $chart->add_series(
+      categories => $CHART_FIELD->($name),
+      values     => $CHART_FIELD->($val),
+      name       => $CHART_HEAD->($val),
+    );
 
     $worksheet->insert_chart(2, @head + 1, $chart);
   }
