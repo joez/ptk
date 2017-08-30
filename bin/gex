@@ -1473,12 +1473,18 @@ sub db_to_xls {
   my $db  = shift or die;
   my $cb  = shift;
 
-  my @sheets
-    = qw/data summary team-activity repo-activity user-activity file ticket reviewer match repo email meta/;
+  my @sheets     = qw/data summary file ticket reviewer match repo email meta/;
   my %sheet_name = map { ($_, $_) } @sheets;
   my %sheet_need = map { ($_, 1) } @sheets;
 
   $sheet_need{match} = exists $db->{match};
+
+  my @charts = qw/team-activity repo-activity user-activity/;
+  my $chart_wanted = $cb && $cb->(chart => 'chart') // \@charts;
+  for my $c (@$chart_wanted) {
+    $sheet_name{$c} = $c;
+    $sheet_need{$c} = 1;
+  }
 
   my %author_email;
   my %id_ticket;
