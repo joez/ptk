@@ -1656,16 +1656,19 @@ sub db_to_xls {
   # "repo-activity" worksheet
   if ($NEED->($sheet = "repo-activity")) {
     my ($key, $val) = qw/Repo Commits/;
-    @head = ($key, $val);
-    @width = (40, 10);
+    @head = ($key, 'System', $val);
+    @width = (40, 10, 10);
 
     $NEW_SHEET->();
 
-    my $td      = $TN->('data');
-    my $formula = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
+    my $td = $TN->('data');
+    my $tr = $TN->('repo');
+    my $fv = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
+    my $fs
+      = qq/=IFERROR(VLOOKUP([[#This Row],[$key]],$tr\[],2,FALSE),"$undefined")/;
 
     # only list non-empty ones
-    $worksheet->write_row($row++, 0, [$_, $formula])
+    $worksheet->write_row($row++, 0, [$_, $fs, $fv])
       for sort grep { @{$db->{data}{$_}{id}} > 0 } keys %{$db->{data}};
 
     $NEW_TABLE->();
