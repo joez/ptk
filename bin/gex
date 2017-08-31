@@ -1688,8 +1688,8 @@ sub db_to_xls {
   # "user-activity" worksheet
   if ($NEED->($sheet = "user-activity")) {
     my ($key, $name, $val) = qw/Email Name Commits/;
-    @head = ($key, $name, $val);
-    @width = (30, 18, 10);
+    @head = ($key, 'Team', $name, $val);
+    @width = (30, 10, 18, 10);
 
     $NEW_SHEET->();
 
@@ -1697,10 +1697,12 @@ sub db_to_xls {
     my $td = $TN->('data');
     my $te = $TN->('user');
     my $fv = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
+    my $ft
+      = qq/=IFERROR(VLOOKUP([[#This Row],[$key]],$te\[],3,FALSE),"$undefined")/;
     my $fn
       = qq/=IFERROR(VLOOKUP([[#This Row],[$key]],$te\[],2,FALSE),"$undefined")/;
 
-    $worksheet->write_row($row++, 0, [$_, $fn, $fv])
+    $worksheet->write_row($row++, 0, [$_, $ft, $fn, $fv])
       for sort keys %author_info;
 
     $NEW_TABLE->();
