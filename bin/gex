@@ -1473,7 +1473,7 @@ sub db_to_xls {
   my $db  = shift or die;
   my $cb  = shift;
 
-  my @sheets     = qw/data summary file ticket reviewer match repo email meta/;
+  my @sheets     = qw/data summary file ticket reviewer match repo user meta/;
   my %sheet_name = map { ($_, $_) } @sheets;
   my %sheet_need = map { ($_, 1) } @sheets;
 
@@ -1547,8 +1547,8 @@ sub db_to_xls {
         for my $m ($d{author_email}) {
           $author_info{$m} = {
             email => $m,
-            name  => $cb && $cb->(email => 'name', $m) // $d{author_name},
-            team  => $cb && $cb->(email => 'team', $m) // $undefined,
+            name  => $cb && $cb->(user => 'name', $m) // $d{author_name},
+            team  => $cb && $cb->(user => 'team', $m) // $undefined,
           };
         }
 
@@ -1587,11 +1587,11 @@ sub db_to_xls {
       }
     );
 
-    # CAUTION: hardcoded with "repo" and "email" worksheet
+    # CAUTION: hardcoded with "repo" and "user" worksheet
     my $fi = {
-      System => ['Repo',  $TN->('repo'),  2],
-      Owner  => ['Repo',  $TN->('repo'),  3],
-      Team   => ['Email', $TN->('email'), 3],
+      System => ['Repo',  $TN->('repo'), 2],
+      Owner  => ['Repo',  $TN->('repo'), 3],
+      Team   => ['Email', $TN->('user'), 3],
     };
     for my $k (keys %$fi) {
       my ($f, $t, $i) = @{$fi->{$k}};
@@ -1695,7 +1695,7 @@ sub db_to_xls {
 
     # CAUTION: hardcoded
     my $td = $TN->('data');
-    my $te = $TN->('email');
+    my $te = $TN->('user');
     my $fv = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
     my $fn
       = qq/=IFERROR(VLOOKUP([[#This Row],[$key]],$te\[],2,FALSE),"$undefined")/;
@@ -1809,8 +1809,8 @@ sub db_to_xls {
     $NEW_TABLE->();
   }
 
-  # "email" worksheet
-  if ($NEED->($sheet = "email")) {
+  # "user" worksheet
+  if ($NEED->($sheet = "user")) {
     @head = (qw/Email Name Team/);
     @width = (30, 18, 10);
 
