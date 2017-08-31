@@ -1498,13 +1498,17 @@ sub db_to_xls {
   my $green    = $workbook->add_format(bg_color => '#A4D050');
   my $style    = 'Table Style Light 1';
   my ($sheet, $worksheet);
-  my ($row,   $col);
-  my (@head,  @width, %head_idx);
+  my (@head,  @width);
+
+  # will be initialized by $NEW_SHEET
+  my ($row,      $col);
+  my (%head_idx, @total);
 
   my $SN = sub { correct_sheet_name($sheet_name{$_[0]}) };
   my $TN = sub { 'Tb' . correct_var_name($SN->($_[0])) };
   my $NEW_SHEET = sub {
     %head_idx = map +($head[$_], $_), 0 .. $#head;
+    @total = ('') x @head;
     ($row, $col) = (0, 0);
     $worksheet = shift || $workbook->add_worksheet($SN->($sheet));
     $worksheet->freeze_panes(1, 0);
@@ -1513,7 +1517,21 @@ sub db_to_xls {
   };
   my $NEW_TABLE = sub {
     my $n = $TN->($sheet);
-    my @c = map { +{header => $_} } @head;
+    my @c;
+    for my $i (0 .. $#head) {
+      my $d = {header => $head[$i]};
+      if (my $t = $total[$i]) {
+
+        # CAUTION: hack here
+        if ($t =~ s/^str://) {
+          $d->{total_string} = $t;
+        }
+        else {
+          $d->{total_function} = $t;
+        }
+      }
+      push @c, $d;
+    }
 
     $worksheet->add_table(0, 0, $row > 1 ? $row : 2,
       $#head, {style => $style, columns => \@c, name => $n, total_row => 1});
@@ -1619,6 +1637,8 @@ sub db_to_xls {
 
     $NEW_SHEET->();
 
+    @total = ('str:Total', ('sum') x @$team);
+
     my $td = $TN->('data');
 
     # CAUTION: "Team" filed is hardcoded
@@ -1661,6 +1681,8 @@ sub db_to_xls {
 
     $NEW_SHEET->();
 
+    @total = ('str:Total', qw/count sum/);
+
     my $td = $TN->('data');
     my $tr = $TN->('repo');
     my $fv = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
@@ -1687,7 +1709,6 @@ sub db_to_xls {
     $worksheet->insert_chart(2, @head + 1, $chart);
   }
 
-
   # "user-activity" worksheet
   if ($NEED->($sheet = "user-activity")) {
     my ($key, $name, $val) = qw/Email Name Commits/;
@@ -1695,6 +1716,8 @@ sub db_to_xls {
     @width = (30, 10, 18, 10);
 
     $NEW_SHEET->();
+
+    @total = ('str:Total', qw/count count sum/);
 
     # CAUTION: hardcoded
     my $td = $TN->('data');
