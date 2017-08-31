@@ -1486,7 +1486,7 @@ sub db_to_xls {
     $sheet_need{$c} = 1;
   }
 
-  my %author_email;
+  my %author_info;
   my %id_ticket;
   my %id_reviewer;
   my %timeline;
@@ -1544,7 +1544,14 @@ sub db_to_xls {
       foreach my $id (@{$db->{data}{$repo}{id}}) {
         my %d = %{$db->{data}{$repo}{data}{$id}};
 
-        $author_email{$d{author_email}} = $d{author_name};
+        for my $m ($d{author_email}) {
+          $author_info{$m} = {
+            email => $m,
+            name  => $cb && $cb->(email => 'name', $m) // $d{author_name},
+            team  => $cb && $cb->(email => 'team', $m) // $undefined,
+          };
+        }
+
         for (@{$d{ticket_ids}}) {
           my $l = join ',', $id, $_;
           $id_ticket{$l}++;
@@ -1603,7 +1610,7 @@ sub db_to_xls {
   # "team-activity" worksheet
   if ($NEED->($sheet = "team-activity")) {
     my $key = 'Date';
-    my $team = $cb && $cb->(email => 'team') // [];
+    my $team = [map { $_->{team} } values %author_info];
     push @$team, $undefined;
     $team = [sort keys %{{map { $_ => 1 } @$team}}];
 
@@ -1693,9 +1700,8 @@ sub db_to_xls {
     my $fn
       = qq/=IFERROR(VLOOKUP([[#This Row],[$key]],$te\[],2,FALSE),"$undefined")/;
 
-    # only list non-empty ones
     $worksheet->write_row($row++, 0, [$_, $fn, $fv])
-      for sort keys %author_email;
+      for sort keys %author_info;
 
     $NEW_TABLE->();
 
@@ -1810,17 +1816,10 @@ sub db_to_xls {
 
     $NEW_SHEET->();
 
-    for my $k (sort keys %author_email) {
-      my %r = ('Email' => $k, 'Name' => $author_email{$k});
-      for my $f (@head[1 .. $#head]) {
-        if ($cb) {
-          my $v = $cb->(email => lc $f, $k);
-          $r{$f} = $v if defined $v;
-        }
-        $r{$f} //= $undefined;
-      }
-      my @l = @r{@head};
-      eval { $worksheet->write_row($row++, 0, \@l) };
+    for my $k (sort keys %author_info) {
+      my %r;
+      $r{$_} = $author_info{$k}{lc $_} // $undefined for @head;
+      eval { $worksheet->write_row($row++, 0, [@r{@head}]) };
     }
     $NEW_TABLE->();
   }
