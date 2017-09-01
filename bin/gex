@@ -59,14 +59,14 @@ DESCRIPTION
 
 COMMAND
     $script report-log [-r <root>] [-o <output>] [-q <query>] [-j <jobs>]
-    [-c <config>] [<src>...]
+    [--config <config>] [<src>...]
       export Git log into spreadsheet
       <query>:    the parameters passed to "git log"
       <output>:   spreadsheet file path, default "log.xlsx"
       <src>:      relative git repo paths
 
     $script report-delta [-r <root>] [-o <output>] [-b <base>] [-j <jobs>]
-    [-c <config>] <this> <that> [<src>...]
+    [--config <config>] <this> <that> [<src>...]
       export commit list need to be integrated from <that> to <this>
       as an spreadsheet
       <output>:   spreadsheet file path, default "delta.xlsx"
@@ -76,7 +76,7 @@ COMMAND
       <src>:      relative Git repo paths
 
     $script report-manifest [-u <url>] [-m <manifest>] [-o <output>]
-    [-c <config>] [-j <jobs>] [-q <query>] [<src>...]
+    [--config <config>] [-j <jobs>] [-q <query>] [<src>...]
       export manifest information into spreadsheet
       <query>:    same as in "dump-repo"
       <output>:   spreadsheet file path, default "manifest.xlsx"
@@ -176,7 +176,10 @@ OPTIONS
     -o, --output
       the output file path
 
-    -c --config
+    -c --command
+      the command to run
+
+    --config
       configuration file for the report command, it is a perl script returns
       a subroutine with args (table, field[, key]), it will be invoked to get
       the config items for the report, e.g. \$cb->(repo => 'owner', 'bionic')
@@ -223,10 +226,10 @@ EXAMPLES
       find all the commit with same changeset but different commit id,
       between "develop" and "upstream" of Git repos in "repo-list.txt"
 
-    11. $script report-delta -c report.cfg develop upstream repo-list.txt
+    11. $script report-delta --config report.cfg develop upstream repo-list.txt
       export all the commit list only exist in the "upstream" branch of
       Git repos in "repo-list.txt" into "delta.xlsx", these commits
-      need to be cherry-picked, "report.cfg" is used for the report
+      need to be cherry-picked, "report.cfg" is as the configuration file
 
     12. $script format-patch -j 4 -q BASE..HEAD repo-list.txt
       format-patch from BASE to HEAD for each repo in repo-list.txt,
@@ -285,7 +288,7 @@ GetOptions(
   "jobs|j=i"     => \$opt{jobs},
   "command|c=s"  => \$opt{command},
   "output|o=s"   => \$opt{output},
-  "config|c=s"   => \$opt{config},
+  "config=s"     => \$opt{config},
   "path"         => \$opt{path},
 ) or usage();
 
