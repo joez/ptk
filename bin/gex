@@ -207,7 +207,7 @@ EXAMPLES
     6. $script report-log -j 4 -q 'develop..upstream' repo-list.txt
       export the commits between "develop" and "upsteam" branches,
       for the Git repos in the "repo-list.txt", and export to "log.xlsx"
-	    with maximal concurrent 4 jobs
+      with maximal concurrent 4 jobs
 
     7. $script clone repo-list.txt
       clone the Git repos in "repo-list.txt" from remote server defined
