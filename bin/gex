@@ -1670,7 +1670,19 @@ sub db_to_xls {
       );
     }
 
-    $worksheet->insert_chart(2, @head + 1, $chart);
+    $worksheet->insert_chart(1, @head + 1, $chart);
+
+    $chart = $workbook->add_chart(type => 'pie', embedded => 1);
+    $chart->set_title(none => 1);
+
+    $chart->add_series(
+      categories => $CHART_RANGE->(0,    0,    1, $#head),
+      values     => $CHART_RANGE->($row, $row, 1, $#head),
+      name       => $CHART_RANGE->($row, $row, 0, 0),
+      data_labels => {percentage => 1},
+    );
+
+    $worksheet->insert_chart(24, @head + 1, $chart);
   }
 
   # "repo-activity" worksheet
@@ -1706,7 +1718,7 @@ sub db_to_xls {
       name       => $CHART_HEAD->($val),
     );
 
-    $worksheet->insert_chart(2, @head + 1, $chart);
+    $worksheet->insert_chart(1, @head + 1, $chart);
   }
 
   # "user-activity" worksheet
@@ -1744,7 +1756,7 @@ sub db_to_xls {
       name       => $CHART_HEAD->($val),
     );
 
-    $worksheet->insert_chart(2, @head + 1, $chart);
+    $worksheet->insert_chart(1, @head + 1, $chart);
   }
 
   # "file" worksheet
