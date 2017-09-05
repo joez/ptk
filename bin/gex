@@ -1571,7 +1571,7 @@ sub db_to_xls {
         my %d = %{$db->{data}{$repo}{data}{$id}};
 
         for my $m ($d{author_email}) {
-          $author_info{$m} = {
+          $author_info{$m} //= {
             email => $m,
             name  => $cb && $cb->(user => 'name', $m) // $d{author_name},
             team  => $cb && $cb->(user => 'team', $m) // $undefined,
@@ -1590,7 +1590,7 @@ sub db_to_xls {
         for (format_date($d{committer_time})) {
           my $k = $_->{date};
           $d{committer_time} = $k;
-          $timeline{$k} = $_ unless $timeline{$k};
+          $timeline{$k} //= $_;
         }
 
         my @l = @d{@fields{@info}};
@@ -1614,7 +1614,7 @@ sub db_to_xls {
       }
     );
 
-    # CAUTION: hardcoded with "repo" and "user" worksheet
+    # CAUTION: hardcoded with other worksheets
     my $fi = {
       System => ['Repo',  $TN->('repo'), 2],
       Owner  => ['Repo',  $TN->('repo'), 3],
@@ -1855,7 +1855,7 @@ sub db_to_xls {
       my @l = map { $cb && $cb->(repo => lc $_, $repo) // $undefined }
         @head[1 .. $#head];
       unshift @l, $repo;
-      eval { $worksheet->write_row($row++, 0, \@l) };
+      $worksheet->write_row($row++, 0, \@l);
     }
     $NEW_TABLE->();
   }
@@ -1870,7 +1870,7 @@ sub db_to_xls {
     for my $k (sort keys %author_info) {
       my %r;
       $r{$_} = $author_info{$k}{lc $_} // $undefined for @head;
-      eval { $worksheet->write_row($row++, 0, [@r{@head}]) };
+      $worksheet->write_row($row++, 0, [@r{@head}]);
     }
     $NEW_TABLE->();
   }
@@ -1885,7 +1885,7 @@ sub db_to_xls {
     for my $k (sort keys %timeline) {
       my %r;
       $r{$_} = $timeline{$k}{lc $_} // $undefined for @head;
-      eval { $worksheet->write_row($row++, 0, [@r{@head}]) };
+      $worksheet->write_row($row++, 0, [@r{@head}]);
     }
     $NEW_TABLE->();
   }
