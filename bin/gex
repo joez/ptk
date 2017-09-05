@@ -23,6 +23,7 @@ use File::Find 'find';
 use File::Temp qw/tempdir/;
 use Text::ParseWords;
 use Digest::MD5 qw/md5_hex/;
+use Time::Piece;
 
 use Ptk::Log;
 use Ptk::Chdir;
@@ -1467,8 +1468,12 @@ sub parse_repo_delta {
 }
 
 sub format_date {
-  my ($sec, $min, $hour, $mday, $mon, $year) = localtime(shift);
-  return sprintf '%04d-%02d-%02d', $year + 1900, $mon + 1, $mday;
+  my $t = localtime(shift);
+  return {
+    date => $t->date,
+    yw   => sprintf('%02dw%02d', $t->yy, $t->week),
+    ym   => sprintf('%02d%02d', $t->yy, $t->mon),
+  };
 }
 
 sub db_to_xls {
@@ -1476,7 +1481,7 @@ sub db_to_xls {
   my $db  = shift or die;
   my $cb  = shift;
 
-  my @sheets     = qw/data summary file ticket reviewer match repo user meta/;
+  my @sheets = qw/data summary file ticket reviewer match repo user date meta/;
   my %sheet_name = map { ($_, $_) } @sheets;
   my %sheet_need = map { ($_, 1) } @sheets;
 
@@ -1553,8 +1558,8 @@ sub db_to_xls {
   # "data" worksheet
   if ($NEED->($sheet = "data")) {
     my @info = qw/ID Author Email Subject Repo Committer Date Gerrit Topic/;
-    @head = (@info, qw/System Status Type Owner Team Note/);
-    @width = (42, 14, 24, 56, 40, 14, 10, 8, 18, 8, 8, 8, 14, 8, 18);
+    @head = (@info, qw/YW YM System Status Type Owner Team Note/);
+    @width = (42, 14, 24, 56, 40, 14, 10, 8, 18, 6, 6, 8, 8, 8, 14, 8, 18);
     my %fields;
     @fields{@info}
       = qw/commit author_name author_email subject repo committer_name committer_time request_id topic/;
@@ -1583,8 +1588,9 @@ sub db_to_xls {
         }
 
         for (format_date($d{committer_time})) {
-          $d{committer_time} = $_;
-          $timeline{$_}++;
+          my $k = $_->{date};
+          $d{committer_time} = $k;
+          $timeline{$k} = $_ unless $timeline{$k};
         }
 
         my @l = @d{@fields{@info}};
@@ -1613,6 +1619,8 @@ sub db_to_xls {
       System => ['Repo',  $TN->('repo'), 2],
       Owner  => ['Repo',  $TN->('repo'), 3],
       Team   => ['Email', $TN->('user'), 3],
+      YW     => ['Date',  $TN->('date'), 2],
+      YM     => ['Date',  $TN->('date'), 3],
     };
     for my $k (keys %$fi) {
       my ($f, $t, $i) = @{$fi->{$k}};
@@ -1862,6 +1870,21 @@ sub db_to_xls {
     for my $k (sort keys %author_info) {
       my %r;
       $r{$_} = $author_info{$k}{lc $_} // $undefined for @head;
+      eval { $worksheet->write_row($row++, 0, [@r{@head}]) };
+    }
+    $NEW_TABLE->();
+  }
+
+  # "date" worksheet
+  if ($NEED->($sheet = "date")) {
+    @head = (qw/Date YW YM/);
+    @width = (10, 6, 6);
+
+    $NEW_SHEET->();
+
+    for my $k (sort keys %timeline) {
+      my %r;
+      $r{$_} = $timeline{$k}{lc $_} // $undefined for @head;
       eval { $worksheet->write_row($row++, 0, [@r{@head}]) };
     }
     $NEW_TABLE->();
