@@ -1476,6 +1476,37 @@ sub format_date {
   };
 }
 
+sub sample_timeline {
+  my $timeline = shift or die;
+  my $cb = shift;
+
+  # CAUTION: hardcoded
+  my $threshold = {Date => 30, YW => 180, YM => 3600};
+  my $sample    = 'Date';
+  my $count     = scalar keys %$timeline;
+
+  if ( $cb
+    && (my $k = $cb->(timeline => 'sample'))
+    && (my $v = $cb->(timeline => 'threshold')))
+  {
+    @{$threshold}{@$k} = @$v;
+  }
+
+  for (sort { $a->[1] <=> $b->[1] }
+    map { [$_, $threshold->{$_}] } keys %$threshold)
+  {
+    $sample = $_->[0];
+
+    # the first one which can hold the count
+    last if $count <= $_->[1];
+  }
+
+  my $k = lc $sample;
+  my $tl = [sort keys %{{map { $_->{$k} => 1 } values %$timeline}}];
+
+  return {sample => $sample, timeline => $tl};
+}
+
 sub db_to_xls {
   my $dst = shift or die;
   my $db  = shift or die;
@@ -1638,7 +1669,8 @@ sub db_to_xls {
 
   # "team-activity" worksheet
   if ($NEED->($sheet = "team-activity")) {
-    my $key = 'Date';
+    my $key  = 'Date';
+    my $tl   = sample_timeline(\%timeline, $cb);
     my $team = [map { $_->{team} } values %author_info];
     push @$team, $undefined;
     $team = [sort keys %{{map { $_ => 1 } @$team}}];
@@ -1653,11 +1685,12 @@ sub db_to_xls {
     my $td = $TN->('data');
 
     # CAUTION: "Team" filed is hardcoded
-    my %v = map {
-      $_, qq/=COUNTIFS($td\[$key],[[#This Row],[$key]],$td\[Team],"$_")/
+    my $sample = $tl->{sample};
+    my %v      = map {
+      $_, qq/=COUNTIFS($td\[$sample],[[#This Row],[$key]],$td\[Team],"$_")/
     } @$team;
 
-    for my $t (sort keys %timeline) {
+    for my $t (@{$tl->{timeline}}) {
       my %d = ($key => $t, %v);
       $worksheet->write_row($row++, 0, [@d{@head}]);
     }
