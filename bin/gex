@@ -137,8 +137,11 @@ COMMAND
       <that>:    the snapshot manifest to be applied
       <src>:     the Git repo paths or names
 
-    $script dump-manifest [-o <output>] [<src>...]
-      load all the provided manifests sequencially and dump to the output
+    $script dump-manifest [--revision <ref>] [-o <output>] [<src>...]
+      load all the provided manifests sequencially and dump to the output,
+      if <ref> is provided, its related revision id will be resolved from the
+      Git repo and filled into the output manifest, usually used as a pin manifest
+      <ref>:     branch, tag or HEAD
       <output>:  the output file, default is "manifest.xml"
       <src>:     the manifest files to load, default ".repo/manifests/default.xml"
 
@@ -185,6 +188,9 @@ OPTIONS
 
     --mkdir
       create a folder for the Git repo if it does exist
+
+    --revision
+      revision such as branch, tag, HEAD, etc.
 
     <src>
       the source files or directories
@@ -251,6 +257,10 @@ EXAMPLES
     16. $script dump-manifest -o manifest.xml
       load default manifest ".repo/manifests/default.xml" and save it to
       manifest.xml
+
+    17. $script dump-manifest --revision HEAD -o manifest.xml
+      load default manifest ".repo/manifests/default.xml", resolve revision
+      id of HEAD for each project, and save it to manifest.xml
 NOTES
     * all the Git repo paths are assumed relative to the root,
       if a path pointing to a existing file, it will be regarded as a
@@ -275,6 +285,7 @@ my %opt = (
   config   => 'report.cfg',
   command  => '',
   mkdir    => 0,
+  revision => '',
 );
 
 my $help;
@@ -291,6 +302,7 @@ GetOptions(
   "output|o=s"   => \$opt{output},
   "config=s"     => \$opt{config},
   "mkdir"        => \$opt{mkdir},
+  "revision=s"   => \$opt{revision},
 ) or usage();
 
 my $cmd = lc(shift || '');
@@ -945,6 +957,40 @@ sub do_dump_manifest {
 
   my $m = Ptk::Manifest->new(shift @manifests);
   $m->load($_) for @manifests;
+
+  if (my $r = $opt{revision}) {
+    my @fail;
+
+    for my $n ($m->list_project_names) {
+      my $repo = $m->get_project($n);
+      my $path = resolve_path($repo->{path});
+      my $cd   = Ptk::Chdir->new;
+
+      unless ($cd->pushd($path)) {
+        push @fail, $n;
+        $log->warn("project $n: fail to access $path, skip");
+      }
+      else {
+        my $id = qx/git rev-parse --verify -q $r/;
+        chomp $id;
+        if ($id) {
+          $log->info("project $n: $r -> $id");
+
+          # update revision
+          $repo->{revision} = $id;
+        }
+        else {
+          push @fail, $n;
+          $log->warn("project $n: can't resolve $r, skip");
+        }
+      }
+    }
+
+    if (@fail) {
+      print 'Total ', scalar @fail, ' projects are failed:', "\n";
+      print join("\n", @fail), "\n";
+    }
+  }
 
   $m->save($out);
 }
