@@ -1209,7 +1209,7 @@ sub do_report_log {
   my $cb    = resolve_config($opt{config});
 
   my $db = {};
-  $db->{meta}{refs}{query} = $opt{query};
+  $db->{meta}{info}{query} = $opt{query};
 
   my $process = sub {
     my $idx  = shift;
@@ -1264,9 +1264,9 @@ sub do_report_delta {
   my $dst   = $opt{output} || 'delta.xlsx';
 
   my $db = {};
-  $db->{meta}{refs}{base} = $base;
-  $db->{meta}{refs}{this} = $this;
-  $db->{meta}{refs}{that} = $that;
+  $db->{meta}{info}{base} = $base;
+  $db->{meta}{info}{this} = $this;
+  $db->{meta}{info}{that} = $that;
 
   my $process = sub {
     my $idx  = shift;
@@ -1900,7 +1900,7 @@ sub db_to_xls {
 
   # "match" worksheet
   if ($NEED->($sheet = "match")) {
-    my ($this, $that) = @{$db->{meta}{refs}}{qw/this that/};
+    my ($this, $that) = @{$db->{meta}{info}}{qw/this that/};
 
     @head = ('Repo', $that, $this, 'Reason', 'Factor');
     @width = (40, 42, 42, 10, 42);
@@ -1971,7 +1971,7 @@ sub db_to_xls {
 
   # "meta" worksheet
   if ($NEED->($sheet = "meta")) {
-    @head = qw/Types Status Priorities Repos References Note/;
+    @head = qw/Types Status Priorities Repos Parameters Values/;
     @width = (10, 10, 10, 46, 40, 14);
 
     my %defs = (
@@ -1984,14 +1984,14 @@ sub db_to_xls {
         // [sort qw/Low Normal High/],
     );
 
-    for my $k (sort keys %{$db->{meta}{refs}}) {
-      push @{$defs{References}}, $db->{meta}{refs}{$k};
-      push @{$defs{Note}},       $k;
+    for my $k (sort keys %{$db->{meta}{info}}) {
+      push @{$defs{Values}},     $db->{meta}{info}{$k};
+      push @{$defs{Parameters}}, $k;
     }
     $defs{Repos} = [sort keys %{$db->{data}}];
 
     $NEW_SHEET->();
-    foreach (qw/Types Status Priorities Repos/) {
+    foreach (@head) {
       $workbook->define_name($_,
         xl_range_formula($SN->($sheet), $row, scalar @{$defs{$_}}, $col, $col)
       );
