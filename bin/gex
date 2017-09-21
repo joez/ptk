@@ -555,7 +555,7 @@ sub repo_to_xls {
   if ($NEED->($sheet = "meta")) {
     @head
       = qw/Status Priorities Repos Remotes Fetches Reviews Parameters Values/;
-    @width = (10, 10, 40, 10, 30, 30, 20, 20);
+    @width = (10, 10, 40, 10, 30, 30, 14, 40);
 
     my %defs = (
       map({ $_, [] } @head),
@@ -1972,7 +1972,7 @@ sub db_to_xls {
   # "meta" worksheet
   if ($NEED->($sheet = "meta")) {
     @head = qw/Types Status Priorities Repos Parameters Values/;
-    @width = (10, 10, 10, 46, 40, 14);
+    @width = (10, 10, 10, 46, 14, 40);
 
     my %defs = (
       map({ $_, [] } @head),
