@@ -89,7 +89,7 @@ COMMAND
       <src>:      relative Git repo paths
 
     $script forall [-r <root>] [-u <url>] [-m <manifest>] [-j <jobs>]
-    [-c <command>] [-p] [<src>...]
+    [-c <command>] [--mkdir] [<src>...]
       run the same shell command in each repo, with cwd as current
       repo's work tree, environment variables are set:
        * REPO_PROJECT:  the name of the project
@@ -158,9 +158,6 @@ COMMAND
 
 OPTIONS
 
-    -p, --path
-      create the Git repo path if it is not exist
-
     -r, --root
       the root directory of the Git repo path, default is "."
       all the Git repo paths are assumed relative to the root
@@ -185,6 +182,9 @@ OPTIONS
       a subroutine with args (table, field[, key]), it will be invoked to get
       the config items for the report, e.g. \$cb->(repo => 'owner', 'bionic')
       to get the "Owner" of the repo named "bionic"
+
+    --mkdir
+      create a folder for the Git repo if it does exist
 
     <src>
       the source files or directories
@@ -274,7 +274,7 @@ my %opt = (
   output   => '',
   config   => 'report.cfg',
   command  => '',
-  path     => 0,
+  mkdir    => 0,
 );
 
 my $help;
@@ -290,7 +290,7 @@ GetOptions(
   "command|c=s"  => \$opt{command},
   "output|o=s"   => \$opt{output},
   "config=s"     => \$opt{config},
-  "path"         => \$opt{path},
+  "mkdir"        => \$opt{mkdir},
 ) or usage();
 
 my $cmd = lc(shift || '');
@@ -624,7 +624,7 @@ sub get_local_rev {
 }
 
 sub do_clone {
-  $opt{path} = 1;
+  $opt{mkdir} = 1;
   $opt{command}
     = 'git clone -o $REPO_REMOTE -b $REPO_RREV $REPO_FETCH/$REPO_PROJECT .';
 
@@ -635,7 +635,7 @@ sub do_forall {
   my $cmd = $opt{command} || 'git status';
   my @repos = resolve_list(@_);
 
-  my $mkp = $opt{path};
+  my $mkd = $opt{mkdir};
 
   my $m;
   my $manifest = catfile(@opt{qw/url manifest/});
@@ -682,7 +682,7 @@ sub do_forall {
     }
     $log->debug($env);
 
-    if ($mkp) {
+    if ($mkd) {
       make_path($path) unless -e $path;
     }
 
