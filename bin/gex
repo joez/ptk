@@ -81,7 +81,7 @@ COMMAND
       export manifest information into spreadsheet
       <query>:    same as in "dump-repo"
       <output>:   spreadsheet file path, default "manifest.xlsx"
-      <src>:      manifest branches, default as HEAD
+      <src>:      manifest revision or file path, default is HEAD
 
     $script clone [-r <root>] [-u <url>] [-m <manifest>] [-j <jobs>]
     [<src>...]
@@ -419,9 +419,22 @@ sub checkout_to {
   return $r->run(qw/reset --hard/, $rev);
 }
 
+sub get_uniq_name {
+  my $prefix = shift or die;
+  my $seen   = shift or die;
+
+  my $result = $prefix;
+  my $suffix = 1;
+  while (exists $seen->{$result}) {
+    $result = join '_', $prefix, $suffix++;
+  }
+
+  return $result;
+}
+
 sub do_report_manifest {
-  my @revs = @_;
-  unshift @revs, 'HEAD' unless @revs;
+  my @srcs = @_;
+  unshift @srcs, 'HEAD' unless @srcs;
 
   my $dst      = $opt{output} || 'manifest.xlsx';
   my $url      = $opt{url};
@@ -429,19 +442,41 @@ sub do_report_manifest {
   my $query    = $opt{query};
   my $cb       = resolve_config($opt{config});
 
+  # check if the provided source is a file path or revision
+  my @revs;
+  my %rev2path;
+  my $suffix = '.xml';
+  for my $s (@srcs) {
+    my $r = $s;
+
+    # if it looks like a manifest and accessible
+    if ($s =~ /$suffix$/ && -e (my $p = catfile($url, $s))) {
+      $r = get_uniq_name(basename($s, $suffix), \%rev2path);
+      $rev2path{$r} = $p;
+    }
+    push @revs, $r;
+  }
+
   my $db = {};
   $db->{meta}{$_} = {} for qw/path remote fetch review revs/;
   $db->{meta}{info}{query}    = $query;
   $db->{meta}{info}{manifest} = $manifest;
   $db->{meta}{info}{revision} = join ', ', @revs;
+  $db->{meta}{info}{source}   = join ', ', @srcs;
 
   for my $rev (@revs) {
     $log->info("processing: $rev");
 
-    my $dir = get_temp_dir();
-    checkout_to($dir, $url, $rev);
+    my $f = $rev2path{$rev};
+    unless ($f) {
 
-    my $f = catfile($dir, $manifest);
+      # it is a revision in the manifest repo
+      my $dir = get_temp_dir();
+      checkout_to($dir, $url, $rev);
+
+      $f = catfile($dir, $manifest);
+    }
+
     my $m = Ptk::Manifest->new($f);
     for my $n ($m->list_project_names($query)) {
       my $r = $m->get_resolved_project($n);
