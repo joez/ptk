@@ -23,6 +23,7 @@ use File::Find 'find';
 use File::Temp qw/tempdir/;
 use Text::ParseWords;
 use Digest::MD5 qw/md5_hex/;
+use Time::Piece;
 
 use Ptk::Log;
 use Ptk::Chdir;
@@ -59,14 +60,14 @@ DESCRIPTION
 
 COMMAND
     $script report-log [-r <root>] [-o <output>] [-q <query>] [-j <jobs>]
-    [-c <config>] [<src>...]
+    [--config <config>] [<src>...]
       export Git log into spreadsheet
       <query>:    the parameters passed to "git log"
       <output>:   spreadsheet file path, default "log.xlsx"
       <src>:      relative git repo paths
 
     $script report-delta [-r <root>] [-o <output>] [-b <base>] [-j <jobs>]
-    [-c <config>] <this> <that> [<src>...]
+    [--config <config>] <this> <that> [<src>...]
       export commit list need to be integrated from <that> to <this>
       as an spreadsheet
       <output>:   spreadsheet file path, default "delta.xlsx"
@@ -76,11 +77,11 @@ COMMAND
       <src>:      relative Git repo paths
 
     $script report-manifest [-u <url>] [-m <manifest>] [-o <output>]
-    [-c <config>] [-j <jobs>] [-q <query>] [<src>...]
+    [--config <config>] [-j <jobs>] [-q <query>] [<src>...]
       export manifest information into spreadsheet
       <query>:    same as in "dump-repo"
       <output>:   spreadsheet file path, default "manifest.xlsx"
-      <src>:      manifest branches, default as HEAD
+      <src>:      manifest revision or file path, default is HEAD
 
     $script clone [-r <root>] [-u <url>] [-m <manifest>] [-j <jobs>]
     [<src>...]
@@ -88,7 +89,7 @@ COMMAND
       <src>:      relative Git repo paths
 
     $script forall [-r <root>] [-u <url>] [-m <manifest>] [-j <jobs>]
-    [-c <command>] [-p] [<src>...]
+    [-c <command>] [--mkdir] [<src>...]
       run the same shell command in each repo, with cwd as current
       repo's work tree, environment variables are set:
        * REPO_PROJECT:  the name of the project
@@ -136,8 +137,11 @@ COMMAND
       <that>:    the snapshot manifest to be applied
       <src>:     the Git repo paths or names
 
-    $script dump-manifest [-o <output>] [<src>...]
-      load all the provided manifests sequencially and dump to the output
+    $script dump-manifest [--revision <ref>] [-o <output>] [<src>...]
+      load all the provided manifests sequencially and dump to the output,
+      if <ref> is provided, its related revision id will be resolved from the
+      Git repo and filled into the output manifest, usually used as a pin manifest
+      <ref>:     branch, tag or HEAD
       <output>:  the output file, default is "manifest.xml"
       <src>:     the manifest files to load, default ".repo/manifests/default.xml"
 
@@ -157,9 +161,6 @@ COMMAND
 
 OPTIONS
 
-    -p, --path
-      create the Git repo path if it is not exist
-
     -r, --root
       the root directory of the Git repo path, default is "."
       all the Git repo paths are assumed relative to the root
@@ -176,11 +177,20 @@ OPTIONS
     -o, --output
       the output file path
 
-    -c --config
+    -c --command
+      the command to run
+
+    --config
       configuration file for the report command, it is a perl script returns
       a subroutine with args (table, field[, key]), it will be invoked to get
       the config items for the report, e.g. \$cb->(repo => 'owner', 'bionic')
       to get the "Owner" of the repo named "bionic"
+
+    --mkdir
+      create a folder for the Git repo if it does exist
+
+    --revision
+      revision such as branch, tag, HEAD, etc.
 
     <src>
       the source files or directories
@@ -207,7 +217,7 @@ EXAMPLES
     6. $script report-log -j 4 -q 'develop..upstream' repo-list.txt
       export the commits between "develop" and "upsteam" branches,
       for the Git repos in the "repo-list.txt", and export to "log.xlsx"
-	    with maximal concurrent 4 jobs
+      with maximal concurrent 4 jobs
 
     7. $script clone repo-list.txt
       clone the Git repos in "repo-list.txt" from remote server defined
@@ -223,10 +233,10 @@ EXAMPLES
       find all the commit with same changeset but different commit id,
       between "develop" and "upstream" of Git repos in "repo-list.txt"
 
-    11. $script report-delta -c report.cfg develop upstream repo-list.txt
+    11. $script report-delta --config report.cfg develop upstream repo-list.txt
       export all the commit list only exist in the "upstream" branch of
       Git repos in "repo-list.txt" into "delta.xlsx", these commits
-      need to be cherry-picked, "report.cfg" is used for the report
+      need to be cherry-picked, "report.cfg" is as the configuration file
 
     12. $script format-patch -j 4 -q BASE..HEAD repo-list.txt
       format-patch from BASE to HEAD for each repo in repo-list.txt,
@@ -247,6 +257,10 @@ EXAMPLES
     16. $script dump-manifest -o manifest.xml
       load default manifest ".repo/manifests/default.xml" and save it to
       manifest.xml
+
+    17. $script dump-manifest --revision HEAD -o manifest.xml
+      load default manifest ".repo/manifests/default.xml", resolve revision
+      id of HEAD for each project, and save it to manifest.xml
 NOTES
     * all the Git repo paths are assumed relative to the root,
       if a path pointing to a existing file, it will be regarded as a
@@ -270,7 +284,8 @@ my %opt = (
   output   => '',
   config   => 'report.cfg',
   command  => '',
-  path     => 0,
+  mkdir    => 0,
+  revision => '',
 );
 
 my $help;
@@ -285,8 +300,9 @@ GetOptions(
   "jobs|j=i"     => \$opt{jobs},
   "command|c=s"  => \$opt{command},
   "output|o=s"   => \$opt{output},
-  "config|c=s"   => \$opt{config},
-  "path"         => \$opt{path},
+  "config=s"     => \$opt{config},
+  "mkdir"        => \$opt{mkdir},
+  "revision=s"   => \$opt{revision},
 ) or usage();
 
 my $cmd = lc(shift || '');
@@ -403,9 +419,22 @@ sub checkout_to {
   return $r->run(qw/reset --hard/, $rev);
 }
 
+sub get_uniq_name {
+  my $prefix = shift or die;
+  my $seen   = shift or die;
+
+  my $result = $prefix;
+  my $suffix = 1;
+  while (exists $seen->{$result}) {
+    $result = join '_', $prefix, $suffix++;
+  }
+
+  return $result;
+}
+
 sub do_report_manifest {
-  my @revs = @_;
-  unshift @revs, 'HEAD' unless @revs;
+  my @srcs = @_;
+  unshift @srcs, 'HEAD' unless @srcs;
 
   my $dst      = $opt{output} || 'manifest.xlsx';
   my $url      = $opt{url};
@@ -413,19 +442,41 @@ sub do_report_manifest {
   my $query    = $opt{query};
   my $cb       = resolve_config($opt{config});
 
+  # check if the provided source is a file path or revision
+  my @revs;
+  my %rev2path;
+  my $suffix = '.xml';
+  for my $s (@srcs) {
+    my $r = $s;
+
+    # if it looks like a manifest and accessible
+    if ($s =~ /$suffix$/ && -e (my $p = catfile($url, $s))) {
+      $r = get_uniq_name(basename($s, $suffix), \%rev2path);
+      $rev2path{$r} = $p;
+    }
+    push @revs, $r;
+  }
+
   my $db = {};
   $db->{meta}{$_} = {} for qw/path remote fetch review revs/;
   $db->{meta}{info}{query}    = $query;
   $db->{meta}{info}{manifest} = $manifest;
   $db->{meta}{info}{revision} = join ', ', @revs;
+  $db->{meta}{info}{source}   = join ', ', @srcs;
 
   for my $rev (@revs) {
     $log->info("processing: $rev");
 
-    my $dir = get_temp_dir();
-    checkout_to($dir, $url, $rev);
+    my $f = $rev2path{$rev};
+    unless ($f) {
 
-    my $f = catfile($dir, $manifest);
+      # it is a revision in the manifest repo
+      my $dir = get_temp_dir();
+      checkout_to($dir, $url, $rev);
+
+      $f = catfile($dir, $manifest);
+    }
+
     my $m = Ptk::Manifest->new($f);
     for my $n ($m->list_project_names($query)) {
       my $r = $m->get_resolved_project($n);
@@ -539,7 +590,7 @@ sub repo_to_xls {
   if ($NEED->($sheet = "meta")) {
     @head
       = qw/Status Priorities Repos Remotes Fetches Reviews Parameters Values/;
-    @width = (10, 10, 40, 10, 30, 30, 20, 20);
+    @width = (10, 10, 40, 10, 30, 30, 14, 40);
 
     my %defs = (
       map({ $_, [] } @head),
@@ -620,7 +671,7 @@ sub get_local_rev {
 }
 
 sub do_clone {
-  $opt{path} = 1;
+  $opt{mkdir} = 1;
   $opt{command}
     = 'git clone -o $REPO_REMOTE -b $REPO_RREV $REPO_FETCH/$REPO_PROJECT .';
 
@@ -631,7 +682,7 @@ sub do_forall {
   my $cmd = $opt{command} || 'git status';
   my @repos = resolve_list(@_);
 
-  my $mkp = $opt{path};
+  my $mkd = $opt{mkdir};
 
   my $m;
   my $manifest = catfile(@opt{qw/url manifest/});
@@ -678,7 +729,7 @@ sub do_forall {
     }
     $log->debug($env);
 
-    if ($mkp) {
+    if ($mkd) {
       make_path($path) unless -e $path;
     }
 
@@ -942,6 +993,40 @@ sub do_dump_manifest {
   my $m = Ptk::Manifest->new(shift @manifests);
   $m->load($_) for @manifests;
 
+  if (my $r = $opt{revision}) {
+    my @fail;
+
+    for my $n ($m->list_project_names) {
+      my $repo = $m->get_project($n);
+      my $path = resolve_path($repo->{path});
+      my $cd   = Ptk::Chdir->new;
+
+      unless ($cd->pushd($path)) {
+        push @fail, $n;
+        $log->warn("project $n: fail to access $path, skip");
+      }
+      else {
+        my $id = qx/git rev-parse --verify -q $r/;
+        chomp $id;
+        if ($id) {
+          $log->info("project $n: $r -> $id");
+
+          # update revision
+          $repo->{revision} = $id;
+        }
+        else {
+          push @fail, $n;
+          $log->warn("project $n: can't resolve $r, skip");
+        }
+      }
+    }
+
+    if (@fail) {
+      print 'Total ', scalar @fail, ' projects are failed:', "\n";
+      print join("\n", @fail), "\n";
+    }
+  }
+
   $m->save($out);
 }
 
@@ -1159,7 +1244,7 @@ sub do_report_log {
   my $cb    = resolve_config($opt{config});
 
   my $db = {};
-  $db->{meta}{refs}{query} = $opt{query};
+  $db->{meta}{info}{query} = $opt{query};
 
   my $process = sub {
     my $idx  = shift;
@@ -1214,9 +1299,9 @@ sub do_report_delta {
   my $dst   = $opt{output} || 'delta.xlsx';
 
   my $db = {};
-  $db->{meta}{refs}{base} = $base;
-  $db->{meta}{refs}{this} = $this;
-  $db->{meta}{refs}{that} = $that;
+  $db->{meta}{info}{base} = $base;
+  $db->{meta}{info}{this} = $this;
+  $db->{meta}{info}{that} = $that;
 
   my $process = sub {
     my $idx  = shift;
@@ -1464,8 +1549,43 @@ sub parse_repo_delta {
 }
 
 sub format_date {
-  my ($sec, $min, $hour, $mday, $mon, $year) = localtime(shift);
-  return sprintf '%04d-%02d-%02d', $year + 1900, $mon + 1, $mday;
+  my $t = localtime(shift);
+  return {
+    date => $t->date,
+    yw   => sprintf('%02dw%02d', $t->yy, $t->week),
+    ym   => sprintf('%02d%02d', $t->yy, $t->mon),
+  };
+}
+
+sub sample_timeline {
+  my $timeline = shift or die;
+  my $cb = shift;
+
+  # CAUTION: hardcoded
+  my $threshold = {Date => 30, YW => 180, YM => 3600};
+  my $sample    = 'Date';
+  my $count     = scalar keys %$timeline;
+
+  if ( $cb
+    && (my $k = $cb->(timeline => 'sample'))
+    && (my $v = $cb->(timeline => 'threshold')))
+  {
+    @{$threshold}{@$k} = @$v;
+  }
+
+  for (sort { $a->[1] <=> $b->[1] }
+    map { [$_, $threshold->{$_}] } keys %$threshold)
+  {
+    $sample = $_->[0];
+
+    # the first one which can hold the count
+    last if $count <= $_->[1];
+  }
+
+  my $k = lc $sample;
+  my $tl = [sort keys %{{map { $_->{$k} => 1 } values %$timeline}}];
+
+  return {sample => $sample, timeline => $tl};
 }
 
 sub db_to_xls {
@@ -1473,7 +1593,7 @@ sub db_to_xls {
   my $db  = shift or die;
   my $cb  = shift;
 
-  my @sheets     = qw/data summary file ticket reviewer match repo email meta/;
+  my @sheets = qw/data summary file ticket reviewer match repo user date meta/;
   my %sheet_name = map { ($_, $_) } @sheets;
   my %sheet_need = map { ($_, 1) } @sheets;
 
@@ -1486,7 +1606,7 @@ sub db_to_xls {
     $sheet_need{$c} = 1;
   }
 
-  my %author_email;
+  my %author_info;
   my %id_ticket;
   my %id_reviewer;
   my %timeline;
@@ -1498,13 +1618,17 @@ sub db_to_xls {
   my $green    = $workbook->add_format(bg_color => '#A4D050');
   my $style    = 'Table Style Light 1';
   my ($sheet, $worksheet);
-  my ($row,   $col);
-  my (@head,  @width, %head_idx);
+  my (@head,  @width);
+
+  # will be initialized by $NEW_SHEET
+  my ($row,      $col);
+  my (%head_idx, @total);
 
   my $SN = sub { correct_sheet_name($sheet_name{$_[0]}) };
   my $TN = sub { 'Tb' . correct_var_name($SN->($_[0])) };
   my $NEW_SHEET = sub {
     %head_idx = map +($head[$_], $_), 0 .. $#head;
+    @total = ('') x @head;
     ($row, $col) = (0, 0);
     $worksheet = shift || $workbook->add_worksheet($SN->($sheet));
     $worksheet->freeze_panes(1, 0);
@@ -1513,7 +1637,21 @@ sub db_to_xls {
   };
   my $NEW_TABLE = sub {
     my $n = $TN->($sheet);
-    my @c = map { +{header => $_} } @head;
+    my @c;
+    for my $i (0 .. $#head) {
+      my $d = {header => $head[$i]};
+      if (my $t = $total[$i]) {
+
+        # CAUTION: hack here
+        if ($t =~ s/^str://) {
+          $d->{total_string} = $t;
+        }
+        else {
+          $d->{total_function} = $t;
+        }
+      }
+      push @c, $d;
+    }
 
     $worksheet->add_table(0, 0, $row > 1 ? $row : 2,
       $#head, {style => $style, columns => \@c, name => $n, total_row => 1});
@@ -1532,8 +1670,8 @@ sub db_to_xls {
   # "data" worksheet
   if ($NEED->($sheet = "data")) {
     my @info = qw/ID Author Email Subject Repo Committer Date Gerrit Topic/;
-    @head = (@info, qw/System Status Type Owner Team Note/);
-    @width = (42, 14, 24, 56, 40, 14, 10, 8, 18, 8, 8, 8, 14, 8, 18);
+    @head = (@info, qw/YW YM System Status Type Owner Team Note/);
+    @width = (42, 14, 24, 56, 40, 14, 10, 8, 18, 6, 6, 8, 8, 8, 14, 8, 18);
     my %fields;
     @fields{@info}
       = qw/commit author_name author_email subject repo committer_name committer_time request_id topic/;
@@ -1544,7 +1682,14 @@ sub db_to_xls {
       foreach my $id (@{$db->{data}{$repo}{id}}) {
         my %d = %{$db->{data}{$repo}{data}{$id}};
 
-        $author_email{$d{author_email}} = $d{author_name};
+        for my $m ($d{author_email}) {
+          $author_info{$m} //= {
+            email => $m,
+            name  => $cb && $cb->(user => 'name', $m) // $d{author_name},
+            team  => $cb && $cb->(user => 'team', $m) // $undefined,
+          };
+        }
+
         for (@{$d{ticket_ids}}) {
           my $l = join ',', $id, $_;
           $id_ticket{$l}++;
@@ -1555,8 +1700,9 @@ sub db_to_xls {
         }
 
         for (format_date($d{committer_time})) {
-          $d{committer_time} = $_;
-          $timeline{$_}++;
+          my $k = $_->{date};
+          $d{committer_time} = $k;
+          $timeline{$k} //= $_;
         }
 
         my @l = @d{@fields{@info}};
@@ -1580,11 +1726,13 @@ sub db_to_xls {
       }
     );
 
-    # CAUTION: hardcoded with "repo" and "email" worksheet
+    # CAUTION: hardcoded with other worksheets
     my $fi = {
-      System => ['Repo',  $TN->('repo'),  2],
-      Owner  => ['Repo',  $TN->('repo'),  3],
-      Team   => ['Email', $TN->('email'), 3],
+      System => ['Repo',  $TN->('repo'), 2],
+      Owner  => ['Repo',  $TN->('repo'), 3],
+      Team   => ['Email', $TN->('user'), 3],
+      YW     => ['Date',  $TN->('date'), 2],
+      YM     => ['Date',  $TN->('date'), 3],
     };
     for my $k (keys %$fi) {
       my ($f, $t, $i) = @{$fi->{$k}};
@@ -1602,8 +1750,9 @@ sub db_to_xls {
 
   # "team-activity" worksheet
   if ($NEED->($sheet = "team-activity")) {
-    my $key = 'Date';
-    my $team = $cb && $cb->(email => 'team') // [];
+    my $key  = 'Date';
+    my $tl   = sample_timeline(\%timeline, $cb);
+    my $team = [map { $_->{team} } values %author_info];
     push @$team, $undefined;
     $team = [sort keys %{{map { $_ => 1 } @$team}}];
 
@@ -1612,14 +1761,17 @@ sub db_to_xls {
 
     $NEW_SHEET->();
 
+    @total = ('str:Total', ('sum') x @$team);
+
     my $td = $TN->('data');
 
     # CAUTION: "Team" filed is hardcoded
-    my %v = map {
-      $_, qq/=COUNTIFS($td\[$key],[[#This Row],[$key]],$td\[Team],"$_")/
+    my $sample = $tl->{sample};
+    my %v      = map {
+      $_, qq/=COUNTIFS($td\[$sample],[[#This Row],[$key]],$td\[Team],"$_")/
     } @$team;
 
-    for my $t (sort keys %timeline) {
+    for my $t (@{$tl->{timeline}}) {
       my %d = ($key => $t, %v);
       $worksheet->write_row($row++, 0, [@d{@head}]);
     }
@@ -1643,22 +1795,39 @@ sub db_to_xls {
       );
     }
 
-    $worksheet->insert_chart(2, @head + 1, $chart);
+    $worksheet->insert_chart(1, @head + 1, $chart);
+
+    $chart = $workbook->add_chart(type => 'pie', embedded => 1);
+    $chart->set_title(none => 1);
+
+    $chart->add_series(
+      categories => $CHART_RANGE->(0,    0,    1, $#head),
+      values     => $CHART_RANGE->($row, $row, 1, $#head),
+      name       => $CHART_RANGE->($row, $row, 0, 0),
+      data_labels => {percentage => 1},
+    );
+
+    $worksheet->insert_chart(24, @head + 1, $chart);
   }
 
   # "repo-activity" worksheet
   if ($NEED->($sheet = "repo-activity")) {
     my ($key, $val) = qw/Repo Commits/;
-    @head = ($key, $val);
-    @width = (40, 10);
+    @head = ($key, 'System', $val);
+    @width = (40, 10, 10);
 
     $NEW_SHEET->();
 
-    my $td      = $TN->('data');
-    my $formula = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
+    @total = ('str:Total', qw/count sum/);
+
+    my $td = $TN->('data');
+    my $tr = $TN->('repo');
+    my $fv = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
+    my $fs
+      = qq/=IFERROR(VLOOKUP([[#This Row],[$key]],$tr\[],2,FALSE),"$undefined")/;
 
     # only list non-empty ones
-    $worksheet->write_row($row++, 0, [$_, $formula])
+    $worksheet->write_row($row++, 0, [$_, $fs, $fv])
       for sort grep { @{$db->{data}{$_}{id}} > 0 } keys %{$db->{data}};
 
     $NEW_TABLE->();
@@ -1674,28 +1843,30 @@ sub db_to_xls {
       name       => $CHART_HEAD->($val),
     );
 
-    $worksheet->insert_chart(2, @head + 1, $chart);
+    $worksheet->insert_chart(1, @head + 1, $chart);
   }
-
 
   # "user-activity" worksheet
   if ($NEED->($sheet = "user-activity")) {
     my ($key, $name, $val) = qw/Email Name Commits/;
-    @head = ($key, $name, $val);
-    @width = (30, 18, 10);
+    @head = ($key, 'Team', $name, $val);
+    @width = (30, 10, 18, 10);
 
     $NEW_SHEET->();
 
+    @total = ('str:Total', qw/count count sum/);
+
     # CAUTION: hardcoded
     my $td = $TN->('data');
-    my $te = $TN->('email');
+    my $te = $TN->('user');
     my $fv = qq/=COUNTIFS($td\[$key],[[#This Row],[$key]])/;
+    my $ft
+      = qq/=IFERROR(VLOOKUP([[#This Row],[$key]],$te\[],3,FALSE),"$undefined")/;
     my $fn
       = qq/=IFERROR(VLOOKUP([[#This Row],[$key]],$te\[],2,FALSE),"$undefined")/;
 
-    # only list non-empty ones
-    $worksheet->write_row($row++, 0, [$_, $fn, $fv])
-      for sort keys %author_email;
+    $worksheet->write_row($row++, 0, [$_, $ft, $fn, $fv])
+      for sort keys %author_info;
 
     $NEW_TABLE->();
 
@@ -1710,7 +1881,7 @@ sub db_to_xls {
       name       => $CHART_HEAD->($val),
     );
 
-    $worksheet->insert_chart(2, @head + 1, $chart);
+    $worksheet->insert_chart(1, @head + 1, $chart);
   }
 
   # "file" worksheet
@@ -1764,7 +1935,7 @@ sub db_to_xls {
 
   # "match" worksheet
   if ($NEED->($sheet = "match")) {
-    my ($this, $that) = @{$db->{meta}{refs}}{qw/this that/};
+    my ($this, $that) = @{$db->{meta}{info}}{qw/this that/};
 
     @head = ('Repo', $that, $this, 'Reason', 'Factor');
     @width = (40, 42, 42, 10, 42);
@@ -1798,37 +1969,45 @@ sub db_to_xls {
       my @l = map { $cb && $cb->(repo => lc $_, $repo) // $undefined }
         @head[1 .. $#head];
       unshift @l, $repo;
-      eval { $worksheet->write_row($row++, 0, \@l) };
+      $worksheet->write_row($row++, 0, \@l);
     }
     $NEW_TABLE->();
   }
 
-  # "email" worksheet
-  if ($NEED->($sheet = "email")) {
+  # "user" worksheet
+  if ($NEED->($sheet = "user")) {
     @head = (qw/Email Name Team/);
     @width = (30, 18, 10);
 
     $NEW_SHEET->();
 
-    for my $k (sort keys %author_email) {
-      my %r = ('Email' => $k, 'Name' => $author_email{$k});
-      for my $f (@head[1 .. $#head]) {
-        if ($cb) {
-          my $v = $cb->(email => lc $f, $k);
-          $r{$f} = $v if defined $v;
-        }
-        $r{$f} //= $undefined;
-      }
-      my @l = @r{@head};
-      eval { $worksheet->write_row($row++, 0, \@l) };
+    for my $k (sort keys %author_info) {
+      my %r;
+      $r{$_} = $author_info{$k}{lc $_} // $undefined for @head;
+      $worksheet->write_row($row++, 0, [@r{@head}]);
+    }
+    $NEW_TABLE->();
+  }
+
+  # "date" worksheet
+  if ($NEED->($sheet = "date")) {
+    @head = (qw/Date YW YM/);
+    @width = (10, 6, 6);
+
+    $NEW_SHEET->();
+
+    for my $k (sort keys %timeline) {
+      my %r;
+      $r{$_} = $timeline{$k}{lc $_} // $undefined for @head;
+      $worksheet->write_row($row++, 0, [@r{@head}]);
     }
     $NEW_TABLE->();
   }
 
   # "meta" worksheet
   if ($NEED->($sheet = "meta")) {
-    @head = qw/Types Status Priorities Repos References Note/;
-    @width = (10, 10, 10, 46, 40, 14);
+    @head = qw/Types Status Priorities Repos Parameters Values/;
+    @width = (10, 10, 10, 46, 14, 40);
 
     my %defs = (
       map({ $_, [] } @head),
@@ -1840,14 +2019,14 @@ sub db_to_xls {
         // [sort qw/Low Normal High/],
     );
 
-    for my $k (sort keys %{$db->{meta}{refs}}) {
-      push @{$defs{References}}, $db->{meta}{refs}{$k};
-      push @{$defs{Note}},       $k;
+    for my $k (sort keys %{$db->{meta}{info}}) {
+      push @{$defs{Values}},     $db->{meta}{info}{$k};
+      push @{$defs{Parameters}}, $k;
     }
     $defs{Repos} = [sort keys %{$db->{data}}];
 
     $NEW_SHEET->();
-    foreach (qw/Types Status Priorities Repos/) {
+    foreach (@head) {
       $workbook->define_name($_,
         xl_range_formula($SN->($sheet), $row, scalar @{$defs{$_}}, $col, $col)
       );
