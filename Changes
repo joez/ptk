@@ -1,4 +1,21 @@
 0.5 2017-08-30
+- gex: support file path for manifest report
+- gex: adjust column width in the meta worksheet
+- gex: add missing info in the report
+- set shell type explicitly for envsetup
+- gex: resolve revision id when dump-manifest
+- gex: rename option "path" to "mkdir"
+- gex: optimize "team-activity" chart
+- gex: optimization and clean up
+- gex: add YW and YM column for report
+- gex: fix forall command
+- gex: trivial doc enhancement
+- gex: add pie chart for "team-activity"
+- gex: add total function for chart tables
+- gex: add "System" field for chart "repo-activity"
+- gex: add "Team" field for chart "user-activity"
+- gex: rename worksheet "email" to "user"
+- gex: get complete team list from author info
 
 0.4 2017-08-19
 - gex: add support to customize which charts to show
