@@ -1439,7 +1439,7 @@ sub parse_commit_message {
       next;
     }
 
-    if (/^(?:Bug|Issue|UTP-Id):\s*(.+)$/) {
+    if (/^(?:Bug|Issue|UTP-Id|Tracked-On):\s*(.+)$/) {
       for (split /\s/, $1) {
         if (/([A-Z-]*\d+)/) {
           push @{$d->{ticket_ids}}, $1;

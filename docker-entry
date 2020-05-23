@@ -1,0 +1,28 @@
+#!/bin/bash
+set -e
+
+# This allows the docker container manipulating files in the shared
+# volume owned by the USER_ID:GROUP_ID, e.g.
+#
+#  docker run -it -e USER_ID=$(id -u) -e GROUP_ID=$(id -g) ptk
+#
+# See also: https://github.com/moby/moby/issues/7198
+
+# allow the container to be started with "--user"
+if [[ "$(id -u)" == '0' ]]; then
+    # if the user is not specified, default as 1000:1000
+    [[ -z $USER_ID ]] && USER_ID=1000
+    [[ -z $GROUP_ID ]] && GROUP_ID=1000
+
+    NAME=joe
+
+    echo "Modify uid/gid of $NAME to $USER_ID:$GROUP_ID"
+    groupmod -g $GROUP_ID $NAME
+    usermod -u $USER_ID $NAME
+    chown -R $NAME:$NAME /home/$NAME
+
+    exec gosu $NAME:$NAME "$@"
+else
+    # do as-is as the user required
+    exec "$@"
+fi

@@ -298,7 +298,7 @@ sub _parse {
   my $self = shift;
   my $file = shift or croak('no file');
 
-  crock("can't access manifest: $file") unless -e $file;
+  croak("can't access manifest: $file") unless -e $file;
 
   my $dom = Mojo::DOM->new(_p($file)->slurp);
   for my $e (_AM($dom)->children->each) {
