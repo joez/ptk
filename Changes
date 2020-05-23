@@ -1,4 +1,7 @@
 0.6 2017-09-23
+- gex: add more ticket id prefix
+- run container as non-root user
+- fix typo in Manifest.pm
 
 0.5 2017-08-30
 - gex: support file path for manifest report
