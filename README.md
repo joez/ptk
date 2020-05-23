@@ -35,7 +35,9 @@ Build a Docker image named `ptk`
 
 Start a container and mount current directory as the workspace
 
-    docker run -it --rm -v `pwd`:/work ptk
+    docker run -it --rm -v $(pwd):/work -e USER_ID=$(id -u) -e GROUP_ID=$(id -g) ptk
+
+The `USER_ID` and `GROUP_ID` are used to make the uid/gid of the container matching the current host user, so that the files created has the right ownership
 
 # See also
 
