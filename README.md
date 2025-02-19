@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/joez/ptk.svg?branch=master)](https://travis-ci.org/joez/ptk) [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/joez/ptk)](https://hub.docker.com/r/joez/ptk/builds)
+[![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/joez/ptk)](https://hub.docker.com/r/joez/ptk/builds)
 
 # About
 
@@ -15,11 +15,11 @@ My private toolkit for software development
 Deploy by [Docker][]
 
     docker pull joez/ptk
-    docker run -it --rm -v $(pwd):/work ptk
+    docker run -it --rm -v $(pwd):/work joez/ptk
 
 Enjoy yourself for the handy tools, e.g.
 
-    # report all the commits of current branch into log.xlsx
+    # report all commits on the current branch of the ptk project into log.xlsx
     gex report-log ptk
 
 # Installation
